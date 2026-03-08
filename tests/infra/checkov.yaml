@@ -1,0 +1,8 @@
+# Checkov policy configuration for infra/ security checks
+# Run: checkov -d infra/ --config-file tests/infra/checkov.yaml
+
+check:
+  - CKV_AWS_8    # Ensure Lightsail instance does not have public SSH (port 22)
+
+skip-check:
+  - CKV2_AWS_5   # IAM policy attached to user (intentional for agent credentials)

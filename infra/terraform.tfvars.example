@@ -1,0 +1,5 @@
+openrouter_api_key = "sk-or-REPLACE_ME"
+slack_bot_token    = "xoxb-REPLACE_ME"
+slack_app_token    = "xapp-REPLACE_ME"
+github_memory_repo = "git@github.com:YOUR_USERNAME/openclaw-memory.git"
+aws_region         = "eu-north-1"

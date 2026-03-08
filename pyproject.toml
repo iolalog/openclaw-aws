@@ -1,0 +1,13 @@
+[project]
+name = "openclaw-aws"
+version = "0.1.0"
+description = "OpenClaw AWS infrastructure (Terraform + smoke tests)"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "boto3>=1.38",
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
