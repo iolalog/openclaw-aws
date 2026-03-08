@@ -1,8 +1,10 @@
 # OpenClaw on AWS — Secure Sandbox Setup
 
+> **Inspired by:** [Running OpenClaw on AWS Lightsail](https://awsfundamentals.com/blog/lightsail-openclaw) (awsfundamentals.com) — the reference architecture this setup is based on.
+
 ## Context
 
-Always-on OpenClaw autonomous AI agent on AWS Lightsail, with strict control over what it can access and do. Follows the hardened Lightsail pattern (awsfundamentals.com/$7 setup). User has an OpenRouter API key and AWS CLI access.
+Always-on OpenClaw autonomous AI agent on AWS Lightsail, with strict control over what it can access and do. Follows the hardened Lightsail pattern from the article above. User has an OpenRouter API key and AWS CLI access.
 
 ### Messaging channel decision
 
