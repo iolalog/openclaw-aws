@@ -139,7 +139,7 @@ Type=simple
 WorkingDirectory=/root/.openclaw/workspace
 Environment=HOME=/root
 ExecStart=/usr/bin/openclaw gateway run
-Restart=on-failure
+Restart=always
 RestartSec=10
 EnvironmentFile=-/etc/openclaw/env
 StandardOutput=journal
