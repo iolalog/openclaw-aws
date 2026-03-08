@@ -97,6 +97,23 @@ openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
 openclaw config set agents.defaults.model "openrouter/anthropic/claude-sonnet-4-6"
 
+# ── Model allowlist ───────────────────────────────────────────────────────────
+# Set agents.defaults.models to restrict which models can be used and provide
+# short aliases for /model switching. Only EU/US-hosted providers are included.
+#
+# After deploy, apply via: openclaw config set agents.defaults.models '{...}'
+# or edit ~/.openclaw/openclaw.json directly. Current allowlist (as of 2026-03-08):
+#
+#   sonnet  → openrouter/anthropic/claude-sonnet-4-6         (default: chat + coding)
+#   codex   → openrouter/openai/gpt-5.3-codex                (agentic coding)
+#   opus    → openrouter/anthropic/claude-opus-4.6           (deep research, design)
+#   gemini  → openrouter/google/gemini-3.1-pro-preview       (document parsing, multimodal)
+#   flash   → openrouter/google/gemini-3.1-flash-lite-preview (simple/cheap tasks)
+#
+# openclaw config set does not support nested JSON objects well — edit the JSON directly:
+#   ~/.openclaw/openclaw.json → agents.defaults.models
+# See: iolalog/openclaw-memory MEMORY.md for the current allowlist.
+
 # Write secrets as a systemd EnvironmentFile — single source of truth for all keys.
 # Never put secrets in openclaw.json.
 mkdir -p /etc/openclaw
