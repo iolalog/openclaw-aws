@@ -2,4 +2,6 @@ openrouter_api_key = "sk-or-REPLACE_ME"
 slack_bot_token    = "xoxb-REPLACE_ME"
 slack_app_token    = "xapp-REPLACE_ME"
 github_memory_repo = "git@github.com:YOUR_USERNAME/openclaw-memory.git"
+github_infra_repo  = "git@github.com:YOUR_USERNAME/openclaw-aws.git"
+gemini_api_key     = "AIza-REPLACE_ME"   # aistudio.google.com — used for memory search embeddings
 aws_region         = "eu-north-1"

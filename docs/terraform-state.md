@@ -14,36 +14,48 @@ The infrastructure is fully reproducible. If state is lost:
 
 ```bash
 # Manually destroy existing resources via AWS console or CLI:
-aws lightsail delete-instance --instance-name openclaw
-aws lightsail release-static-ip --static-ip-name openclaw-ip
-aws iam delete-user --user-name openclaw-agent          # (detach policy first)
-aws iam delete-role --role-name openclaw-ssm-hybrid     # (detach policy first)
-# Delete the SSM activation from the console
+aws ec2 terminate-instances --instance-ids i-XXXXXXXXXXXXXXXXX
+aws ec2 release-address --allocation-id eipalloc-XXXXXXXXXXXXXXXXX
+aws ec2 delete-security-group --group-id sg-XXXXXXXXXXXXXXXXX
+aws ec2 delete-subnet --subnet-id subnet-XXXXXXXXXXXXXXXXX
+aws ec2 delete-route-table --route-table-id rtb-XXXXXXXXXXXXXXXXX
+aws ec2 detach-internet-gateway --internet-gateway-id igw-XXXXXXXXXXXXXXXXX --vpc-id vpc-XXXXXXXXXXXXXXXXX
+aws ec2 delete-internet-gateway --internet-gateway-id igw-XXXXXXXXXXXXXXXXX
+aws ec2 delete-vpc --vpc-id vpc-XXXXXXXXXXXXXXXXX
+aws iam remove-role-from-instance-profile --instance-profile-name openclaw-instance-profile --role-name openclaw-instance-role
+aws iam delete-instance-profile --instance-profile-name openclaw-instance-profile
+aws iam detach-role-policy --role-name openclaw-instance-role --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws iam delete-role-policy --role-name openclaw-instance-role --policy-name openclaw-cost-explorer
+aws iam delete-role --role-name openclaw-instance-role
+# Delete the DLM lifecycle policy and dlm role from the console or CLI
 
 # Then redeploy cleanly:
 cd infra && terraform apply
 ```
 
-The only thing lost is the deploy key at `/root/.ssh/openclaw_deploy` — you will
-need to generate a new one and update the GitHub deploy key (takes ~2 minutes).
-OpenClaw memory and config live in the `openclaw-memory` GitHub repo and survive.
+The only things lost are the SSH deploy keys at `/root/.ssh/openclaw_deploy` and
+`/root/.ssh/openclaw_infra` — you will need to generate new ones and update the
+GitHub deploy keys (takes ~2 minutes). OpenClaw memory and config live in the
+`openclaw-memory` GitHub repo and survive.
 
 ### Option B: Re-import existing resources into state
 
-If you want to avoid recreating the instance (e.g. to preserve the static IP or
+If you want to avoid recreating the instance (e.g. to preserve the EIP or
 avoid a few minutes of downtime):
 
 ```bash
 cd infra
 
-# Import each resource by its identifier
-terraform import aws_lightsail_instance.openclaw          openclaw
-terraform import aws_lightsail_static_ip.openclaw         openclaw-ip
-terraform import aws_lightsail_static_ip_attachment.openclaw openclaw-ip
-terraform import aws_iam_role.ssm_hybrid                  openclaw-ssm-hybrid
-terraform import aws_iam_user.openclaw                    openclaw-agent
-terraform import aws_iam_access_key.openclaw              <access-key-id>   # see IAM console
-terraform import aws_ssm_activation.openclaw              <activation-id>   # from outputs or SSM console
+# Get resource IDs from the AWS console or CLI first, then:
+terraform import aws_vpc.openclaw                    vpc-XXXXXXXXXXXXXXXXX
+terraform import aws_subnet.openclaw                 subnet-XXXXXXXXXXXXXXXXX
+terraform import aws_internet_gateway.openclaw       igw-XXXXXXXXXXXXXXXXX
+terraform import aws_route_table.openclaw            rtb-XXXXXXXXXXXXXXXXX
+terraform import aws_security_group.openclaw         sg-XXXXXXXXXXXXXXXXX
+terraform import aws_iam_role.openclaw               openclaw-instance-role
+terraform import aws_iam_instance_profile.openclaw   openclaw-instance-profile
+terraform import aws_instance.openclaw               i-XXXXXXXXXXXXXXXXX
+terraform import aws_eip.openclaw                    eipalloc-XXXXXXXXXXXXXXXXX
 ```
 
 After importing, run `terraform plan` — it should show no changes if the live
@@ -58,7 +70,7 @@ cp infra/terraform.tfstate ~/backups/openclaw-tfstate-$(date +%Y%m%d).json
 ```
 
 Or keep a copy in an encrypted location (Proton Drive, etc.). Do not commit it
-to git — it contains the IAM access key secret in plaintext.
+to git.
 
 ## Future improvement: S3 backend
 
@@ -70,8 +82,8 @@ to an S3 backend. This is a single migration step with no downtime:
 ```bash
 aws s3api create-bucket \
   --bucket openclaw-tfstate \
-  --region eu-west-1 \
-  --create-bucket-configuration LocationConstraint=eu-west-1
+  --region eu-north-1 \
+  --create-bucket-configuration LocationConstraint=eu-north-1
 
 aws s3api put-bucket-versioning \
   --bucket openclaw-tfstate \
@@ -91,7 +103,7 @@ terraform {
   backend "s3" {
     bucket = "openclaw-tfstate"
     key    = "openclaw/terraform.tfstate"
-    region = "eu-west-1"
+    region = "eu-north-1"
   }
   required_providers { ... }
 }

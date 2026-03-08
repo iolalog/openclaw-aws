@@ -1,7 +1,7 @@
 """
-Smoke tests for the OpenClaw Lightsail deployment.
+Smoke tests for the OpenClaw EC2 deployment.
 
-Run after `terraform apply` completes and the bootstrap script has had ~2 min:
+Run after `terraform apply` completes and the bootstrap script has had ~3 min:
 
     uv run pytest tests/smoke/ -v
 """
@@ -50,32 +50,41 @@ class TestSSM:
 
 
 class TestFirewall:
-    def test_port_22_closed(self, lightsail_client):
-        resp = lightsail_client.get_instance_port_states(instanceName="openclaw")
-        port_states = resp["portStates"]
-        open_ports = {p["fromPort"] for p in port_states if p["state"] == "open"}
-        assert 22 not in open_ports, (
-            f"Port 22 is open — it must remain closed. Open ports: {open_ports}"
+    def test_no_inbound_rules(self, ec2_client):
+        resp = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["openclaw-sg"]}]
+        )
+        sgs = resp["SecurityGroups"]
+        assert sgs, "Security group 'openclaw-sg' not found"
+        sg = sgs[0]
+        assert sg["IpPermissions"] == [], (
+            f"Security group has inbound rules — expected none: {sg['IpPermissions']}"
         )
 
-    def test_port_443_open(self, lightsail_client):
-        resp = lightsail_client.get_instance_port_states(instanceName="openclaw")
-        port_states = resp["portStates"]
-        open_ports = {p["fromPort"] for p in port_states if p["state"] == "open"}
-        assert 443 in open_ports, f"Port 443 is not open. Open ports: {open_ports}"
+    def test_port_22_not_reachable(self, ec2_client):
+        resp = ec2_client.describe_security_groups(
+            Filters=[{"Name": "group-name", "Values": ["openclaw-sg"]}]
+        )
+        sg = resp["SecurityGroups"][0]
+        open_ports = set()
+        for rule in sg["IpPermissions"]:
+            if rule.get("FromPort") is not None:
+                open_ports.add(rule["FromPort"])
+        assert 22 not in open_ports, (
+            f"Port 22 is open in security group — it must remain closed"
+        )
 
 
 class TestIAMScope:
-    """Verify the openclaw-agent IAM user cannot exceed its minimal policy."""
+    """Verify the openclaw instance role cannot exceed its minimal policy."""
 
-    def test_cannot_list_s3_buckets(self, iam_client):
-        """openclaw-agent has no S3 permissions — simulate with a policy check."""
-        # We verify the inline policy contains only ce:* actions
-        resp = iam_client.get_user_policy(
-            UserName="openclaw-agent",
-            PolicyName="openclaw_minimal",
-        )
+    def test_role_policy_ce_only(self, iam_client):
+        """Instance role inline policy contains only ce:* actions."""
         import json
+        resp = iam_client.get_role_policy(
+            RoleName="openclaw-instance-role",
+            PolicyName="openclaw-cost-explorer",
+        )
         from urllib.parse import unquote
         policy = json.loads(unquote(resp["PolicyDocument"]))
         actions = []
@@ -85,5 +94,5 @@ class TestIAMScope:
                 acts = [acts]
             actions.extend(acts)
         assert all(a.startswith("ce:") for a in actions), (
-            f"Unexpected actions in openclaw-agent policy: {actions}"
+            f"Unexpected actions in openclaw instance role policy: {actions}"
         )

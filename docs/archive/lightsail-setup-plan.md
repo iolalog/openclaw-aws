@@ -1,5 +1,8 @@
 # OpenClaw on AWS — Secure Sandbox Setup
 
+> **DEPRECATED — Lightsail setup.** This document describes the original Lightsail deployment.
+> The infrastructure has been migrated to EC2. See [`docs/ec2-migration.md`](ec2-migration.md) for the current architecture.
+
 > **Inspired by:** [Running OpenClaw on AWS Lightsail](https://awsfundamentals.com/blog/lightsail-openclaw) (awsfundamentals.com) — the reference architecture this setup is based on.
 
 ## Context

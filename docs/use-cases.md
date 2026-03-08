@@ -17,7 +17,7 @@
 
 - **Background coding tasks** — code generation, refactoring, CI automation
 - **Shell and file automation** — execute commands, manage files, automate browser operations
-- **CloudWatch log tail** — read recent Lightsail/SSM logs for ops visibility (read-only, no new IAM needed)
+- **CloudWatch log tail** — read recent EC2/SSM logs for ops visibility (read-only, no new IAM needed)
 
 ## Financial monitoring
 

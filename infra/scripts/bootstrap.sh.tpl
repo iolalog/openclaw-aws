@@ -4,33 +4,16 @@ exec > /var/log/openclaw-bootstrap.log 2>&1
 
 echo "[bootstrap] Starting at $(date)"
 
-# ── 0. Add swap (npm install needs it on 1GB RAM instances) ───────────────────
-if [ ! -f /swapfile ]; then
-  fallocate -l 1G /swapfile
-  chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
-  echo '/swapfile none swap sw 0 0' >> /etc/fstab
-  echo "[bootstrap] 1GB swap created"
-fi
-
-# ── 1. Install SSM agent and register with hybrid activation ──────────────────
+# ── 1. Install SSM agent ──────────────────────────────────────────────────────
+# EC2 + instance profile: SSM works natively — no hybrid activation registration needed.
 snap install amazon-ssm-agent --classic || true
 
-# Wait for snap to finish
 sleep 5
-
-/snap/amazon-ssm-agent/current/amazon-ssm-agent \
-  -register \
-  -code "${ssm_activation_code}" \
-  -id   "${ssm_activation_id}" \
-  -region "${region}" \
-  || echo "[bootstrap] SSM register returned non-zero (may already be registered)"
 
 systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
 systemctl start  snap.amazon-ssm-agent.amazon-ssm-agent.service
 
-echo "[bootstrap] SSM agent registered and started"
+echo "[bootstrap] SSM agent installed and started"
 
 # ── 2. Install Node.js v22 via NodeSource ─────────────────────────────────────
 apt-get update -qq
@@ -80,10 +63,8 @@ echo "[bootstrap] INFRA READ KEY (add to iolalog/openclaw-aws as deploy key, rea
 cat /root/.ssh/openclaw_infra.pub
 
 # ── 5. Configure OpenClaw via its native CLI ──────────────────────────────────
-# All secrets are passed via environment variables (EnvironmentFile=/etc/openclaw/env).
-# openclaw picks up OPENROUTER_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-# and AWS_DEFAULT_REGION automatically from the environment — do not embed them in
-# openclaw.json.
+# AWS credentials are provided automatically by the EC2 instance role via IMDS.
+# Only OPENROUTER_API_KEY is injected via EnvironmentFile — no AWS keys on disk.
 
 openclaw config set channels.slack.accounts.default.botToken "${slack_bot_token}"
 openclaw config set channels.slack.accounts.default.appToken "${slack_app_token}"
@@ -96,6 +77,9 @@ openclaw config set channels.slack.groupPolicy open
 openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
 openclaw config set agents.defaults.model "openrouter/anthropic/claude-sonnet-4-6"
+# Enable memory search with Google embeddings (text-embedding-004).
+openclaw config set agents.defaults.memorySearch.enabled true
+openclaw config set agents.defaults.memorySearch.provider gemini
 
 # ── Model allowlist ───────────────────────────────────────────────────────────
 # Set agents.defaults.models to restrict which models can be used and provide
@@ -114,31 +98,33 @@ openclaw config set agents.defaults.model "openrouter/anthropic/claude-sonnet-4-
 #   ~/.openclaw/openclaw.json → agents.defaults.models
 # See: iolalog/openclaw-memory MEMORY.md for the current allowlist.
 
-# Write secrets as a systemd EnvironmentFile — single source of truth for all keys.
-# Never put secrets in openclaw.json.
-mkdir -p /etc/openclaw
+# Write secrets as a systemd EnvironmentFile.
+# AWS credentials are NOT written here — they come from the instance role via IMDS.
+mkdir -p /etc/openclaw /var/tmp/openclaw-compile-cache
 cat > /etc/openclaw/env <<ENVFILE
 OPENROUTER_API_KEY=${openrouter_api_key}
-AWS_ACCESS_KEY_ID=${aws_access_key_id}
-AWS_SECRET_ACCESS_KEY=${aws_secret_access_key}
-AWS_DEFAULT_REGION=${region}
+GEMINI_API_KEY=${gemini_api_key}
+OPENCLAW_INFRA_REPO=${github_infra_repo}
+OPENCLAW_MEMORY_REPO=${github_memory_repo}
+NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
+OPENCLAW_NO_RESPAWN=1
 ENVFILE
 chmod 600 /etc/openclaw/env
 
 echo "[bootstrap] OpenClaw config written"
 
 # ── 6. Clone openclaw-memory repo ────────────────────────────────────────────
-mkdir -p /var/lib/openclaw
+mkdir -p /root/.openclaw
 
-if [ ! -d /var/lib/openclaw/memory/.git ]; then
+if [ ! -d /root/.openclaw/workspace/.git ]; then
   # First-time clone — will fail until deploy key is added to GitHub.
-  # The service will retry on start.
-  git clone "${github_memory_repo}" /var/lib/openclaw/memory 2>&1 \
-    && echo "[bootstrap] Memory repo cloned" \
-    || echo "[bootstrap] WARNING: Memory repo clone failed — add deploy key to GitHub, then: git clone ${github_memory_repo} /var/lib/openclaw/memory"
+  # After adding the key, run: git clone <repo> /root/.openclaw/workspace && systemctl start openclaw-gateway
+  git clone "${github_memory_repo}" /root/.openclaw/workspace 2>&1 \
+    && echo "[bootstrap] Memory repo cloned to /root/.openclaw/workspace" \
+    || echo "[bootstrap] WARNING: Memory repo clone failed — add deploy key to GitHub, then: git clone ${github_memory_repo} /root/.openclaw/workspace && systemctl start openclaw-gateway"
 else
   echo "[bootstrap] Memory repo already present, pulling latest"
-  git -C /var/lib/openclaw/memory pull
+  git -C /root/.openclaw/workspace pull
 fi
 
 # ── 7. Create and enable openclaw-gateway systemd service ─────────────────────
@@ -152,7 +138,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/root/.openclaw/workspace
 Environment=HOME=/root
-ExecStart=/usr/bin/node --max-old-space-size=800 /usr/bin/openclaw gateway run
+ExecStart=/usr/bin/openclaw gateway run
 Restart=on-failure
 RestartSec=10
 EnvironmentFile=-/etc/openclaw/env

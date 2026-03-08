@@ -1,6 +1,16 @@
-# Manual Setup Steps
+# Setup Guide
 
-These steps must be done once before or alongside `terraform apply`.
+## Pre-flight: check for existing deployments
+
+```bash
+cd infra && terraform state list 2>/dev/null
+```
+
+- **Empty output** → proceed with this guide
+- **Shows `aws_instance.*`** → you already have an EC2 deployment; run `terraform plan` to check drift
+- **Shows `aws_lightsail_*`** → you have the old Lightsail deployment; see `docs/archive/lightsail-to-ec2-migration.md`
+
+---
 
 ## 1. Slack App
 
@@ -15,7 +25,7 @@ Already completed if you have `xoxb-` and `xapp-` tokens. If not:
    - `channels:read`, `groups:read`, `mpim:read`
    - `users:read`
    - `app_mentions:read`
-   - `assistant:write` (enables typing indicators — also requires Agents & AI Apps feature, see step 6)
+   - `assistant:write` (enables typing indicators — also requires Agents & AI Apps feature, see step 7)
    - `reactions:read`, `reactions:write`
    - `pins:read`, `pins:write`
    - `emoji:read`
@@ -23,18 +33,17 @@ Already completed if you have `xoxb-` and `xapp-` tokens. If not:
    - `files:read`, `files:write`
    - `mpim:write`
 4. Under **Event Subscriptions → Subscribe to bot events**, add:
-   - `message.im` — direct messages to the bot
-   - `message.channels`, `message.groups`, `message.mpim` — channel/group messages
-   - `app_mention` — mentions in channels
+   - `message.im`, `message.channels`, `message.groups`, `message.mpim`
+   - `app_mention`
    - `reaction_added`, `reaction_removed`
    - `member_joined_channel`, `member_left_channel`
    - `channel_rename`
    - `pin_added`, `pin_removed`
 5. Install app to workspace → copy Bot Token (`xoxb-`)
 6. Under **App Home → Show Tabs**, enable **Messages Tab** and allow DMs
-7. (Optional, for streaming/typing indicators) Under **App Features**, enable **Agents & AI Apps**
+7. (Optional) Under **App Features**, enable **Agents & AI Apps** for typing indicators
 
-> **After any changes to scopes or event subscriptions, reinstall the app to the workspace** (Settings → Install App → Reinstall to Workspace) for changes to take effect.
+> **After any scope or event changes: reinstall the app to the workspace.**
 
 ## 2. GitHub Repos
 
@@ -42,15 +51,15 @@ Already completed if you have `xoxb-` and `xapp-` tokens. If not:
 # Infrastructure repo (this one)
 gh repo create openclaw-aws --private --description "OpenClaw AWS infrastructure"
 
-# Memory repo
+# Memory repo — stores agent memory, config, and skills across deploys
 gh repo create openclaw-memory --private --description "OpenClaw agent memory and config"
 ```
 
-## 3. Populate terraform.tfvars
+## 3. Populate `terraform.tfvars`
 
 ```bash
 cp infra/terraform.tfvars.example infra/terraform.tfvars
-# Edit infra/terraform.tfvars with your actual values
+# Edit with your actual values
 ```
 
 ## 4. Deploy
@@ -58,41 +67,38 @@ cp infra/terraform.tfvars.example infra/terraform.tfvars
 ```bash
 cd infra
 terraform init
-terraform plan
+terraform plan   # review what will be created
 terraform apply
 ```
 
-## 5. Add GitHub Deploy Key (~2 min after apply)
+## 5. Add GitHub deploy keys (~3 min after apply)
 
-Once the instance is up and the bootstrap script has run:
+The bootstrap generates fresh SSH keys. Get them via SSM:
 
 ```bash
-# Get managed instance ID
-aws ssm describe-instance-information \
-  --query 'InstanceInformationList[*].InstanceId' --output text
+# Instance ID from Terraform output
+terraform output instance_id
 
 # Open a session
-aws ssm start-session --target mi-XXXXXXXXXXXXXXXXX
+aws ssm start-session --target i-XXXXXXXXXXXXXXXXX
 
-# On the instance:
-sudo cat /root/.ssh/openclaw_deploy.pub
+# On the instance — two keys:
+cat /root/.ssh/openclaw_deploy.pub   # add to openclaw-memory (write access)
+cat /root/.ssh/openclaw_infra.pub    # add to openclaw-aws (read-only)
 ```
 
-Copy the public key and add it to:
-`github.com/YOUR_USERNAME/openclaw-memory` → **Settings → Deploy keys**
-(enable **Allow write access**)
+Add each key in GitHub → repo → **Settings → Deploy keys**.
 
-> **Note:** GitHub will suggest using a GitHub App instead. For a single private repo this deploy key is fine. A GitHub App would give shorter-lived tokens and finer-grained permissions, but requires more setup. Consider it if you later add more repos or tighter security requirements.
+Then on the instance, clone the memory repo if bootstrap couldn't (deploy key wasn't added yet):
 
-Then on the instance:
 ```bash
 git clone git@github.com:YOUR_USERNAME/openclaw-memory.git /var/lib/openclaw/memory
-sudo systemctl restart openclaw-gateway
+systemctl restart openclaw-gateway
 ```
 
-## 6. Approve Slack Pairing and Lock Down Access
+## 6. Approve Slack pairing
 
-Send a DM to the bot. It will reply with a pairing code:
+Send a DM to the bot. It replies with a pairing code:
 
 ```
 OpenClaw: access not configured.
@@ -101,37 +107,38 @@ Pairing code: XXXXXXXX
 Ask the bot owner to approve with: openclaw pairing approve slack XXXXXXXX
 ```
 
-Approve from your machine via SSM:
+Approve via SSM:
 
 ```bash
 aws ssm send-command \
-  --instance-id mi-XXXXXXXXXXXXXXXXX \
+  --instance-id i-XXXXXXXXXXXXXXXXX \
   --document-name "AWS-RunShellScript" \
-  --parameters '{"commands":["openclaw pairing approve slack <PAIRING_CODE>"]}' \
+  --parameters '{"commands":["openclaw pairing approve slack <CODE>"]}' \
+  --region eu-north-1 \
   --query 'Command.CommandId' --output text
 ```
 
-After approval, tighten access so only approved users can interact (the approved user ID is written to `/root/.openclaw/credentials/slack-default-allowFrom.json` by the pairing step):
+Then lock down to approved users only:
 
 ```bash
 aws ssm send-command \
-  --instance-id mi-XXXXXXXXXXXXXXXXX \
+  --instance-id i-XXXXXXXXXXXXXXXXX \
   --document-name "AWS-RunShellScript" \
   --parameters '{"commands":["openclaw config set channels.slack.groupPolicy allowlist"]}' \
+  --region eu-north-1 \
   --query 'Command.CommandId' --output text
 ```
 
-The config change is picked up live — no restart needed. Verify with another DM.
+Config changes are hot-reloaded — no restart needed.
 
 ## 7. Verify
 
 ```bash
-# On the instance
-sudo systemctl status openclaw-gateway
-sudo journalctl -u openclaw-gateway -f
-
-# From your machine (after instance is SSM-registered)
+# Smoke tests (from repo root)
 uv run pytest tests/smoke/ -v
+
+# On the instance
+journalctl -u openclaw-gateway -f
 ```
 
 ## Teardown
@@ -140,4 +147,4 @@ uv run pytest tests/smoke/ -v
 cd infra && terraform destroy
 ```
 
-This gives a completely clean slate. All state is local (`terraform.tfstate`, gitignored).
+Fully reproducible — `terraform apply` gives a clean slate. Memory and config in the `openclaw-memory` GitHub repo survive teardown.

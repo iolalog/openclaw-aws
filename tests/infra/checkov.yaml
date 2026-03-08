@@ -2,7 +2,9 @@
 # Run: checkov -d infra/ --config-file tests/infra/checkov.yaml
 
 check:
-  - CKV_AWS_8    # Ensure Lightsail instance does not have public SSH (port 22)
+  - CKV_AWS_88   # Ensure EC2 instance does not have public IP via network interface
+  - CKV_AWS_79   # Ensure EC2 instance is not using IMDSv1 (enforce IMDSv2)
+  - CKV_AWS_8    # Ensure EC2 launch configuration does not have public IP
 
 skip-check:
-  - CKV2_AWS_5   # IAM policy attached to user (intentional for agent credentials)
+  - CKV2_AWS_41  # IAM role for DLM is service-linked — intentional

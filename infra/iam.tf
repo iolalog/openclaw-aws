@@ -1,37 +1,29 @@
-# SSM hybrid activation — Lightsail instances cannot use IAM instance profiles
-resource "aws_iam_role" "ssm_hybrid" {
-  name = "openclaw-ssm-hybrid"
+# ── EC2 instance role ─────────────────────────────────────────────────────────
+# Replaces the Lightsail IAM user + SSM hybrid activation.
+# EC2 instance profile provides auto-rotating credentials via IMDS — no keys on disk.
+
+resource "aws_iam_role" "openclaw" {
+  name = "openclaw-instance-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "ssm.amazonaws.com" }
+      Principal = { Service = "ec2.amazonaws.com" }
       Action    = "sts:AssumeRole"
     }]
   })
 }
 
 resource "aws_iam_role_policy_attachment" "ssm_core" {
-  role       = aws_iam_role.ssm_hybrid.name
+  role       = aws_iam_role.openclaw.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_ssm_activation" "openclaw" {
-  name               = "openclaw-activation"
-  iam_role           = aws_iam_role.ssm_hybrid.name
-  registration_limit = 1
-
-  depends_on = [aws_iam_role_policy_attachment.ssm_core]
-}
-
-# Scoped IAM user for OpenClaw skills — expand deliberately as skills are added
-resource "aws_iam_user" "openclaw" {
-  name = "openclaw-agent"
-}
-
-resource "aws_iam_user_policy" "openclaw_minimal" {
-  user = aws_iam_user.openclaw.name
+# Scoped inline policy — expand deliberately as skills are added
+resource "aws_iam_role_policy" "openclaw_cost_explorer" {
+  name = "openclaw-cost-explorer"
+  role = aws_iam_role.openclaw.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -43,6 +35,27 @@ resource "aws_iam_user_policy" "openclaw_minimal" {
   })
 }
 
-resource "aws_iam_access_key" "openclaw" {
-  user = aws_iam_user.openclaw.name
+resource "aws_iam_instance_profile" "openclaw" {
+  name = "openclaw-instance-profile"
+  role = aws_iam_role.openclaw.name
+}
+
+# ── DLM role for automated AMI snapshots ──────────────────────────────────────
+
+resource "aws_iam_role" "dlm" {
+  name = "openclaw-dlm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "dlm.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "dlm_full" {
+  role       = aws_iam_role.dlm.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRoleForAMIManagement"
 }
