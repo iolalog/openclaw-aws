@@ -161,7 +161,90 @@ uv run pytest tests/smoke/ -v
 journalctl -u openclaw-gateway -f
 ```
 
-## 9. Teardown
+## 9. Recovery (break-glass)
+
+OpenClaw can modify its own gateway config. If it sets an invalid value the gateway crashes into a restart loop and becomes unreachable via Slack. Three recovery tiers are available — pick the first one that applies.
+
+### Tier 1 — Automatic (no human needed)
+
+The service has a self-healing loop built in:
+
+- `Restart=always` — systemd restarts on any exit
+- `ExecStartPre=/usr/local/bin/openclaw-prestart` — counts consecutive failures; after **3 failed starts** it automatically restores the known-good config and resets the counter
+- A cron job (`/etc/cron.d/openclaw-watchdog`) refreshes the known-good snapshot every 5 minutes while the service is healthy
+
+In most cases the service heals itself within 30–60 seconds. No action needed — just wait.
+
+### Tier 2 — Mobile (AWS app, ~3 taps)
+
+If the automatic recovery doesn't fire or you want to force it immediately:
+
+1. Open the **AWS Console mobile app**
+2. Hamburger menu → **Systems Manager** → **Run Command** → **Create command**
+3. Search for `OpenClawStatus` → select instance `i-0f94c1bdc56033056` (or by tag `Name=openclaw`) → **Run** → check output to diagnose
+4. If recovery is needed: repeat with `OpenClawRecover`, leave **Mode** as `known-good` → **Run**
+5. Follow up with `OpenClawStatus` to confirm the service came up
+
+**Which Mode to pick:**
+- `known-good` — last config that was running without errors (refreshed by cron every 5 min while healthy). Use this first.
+- `safe` — factory config written at bootstrap time. Use this if known-good is also broken (e.g. a bad model string was saved before the cron refreshed).
+
+### Tier 3 — SSM shell (laptop fallback)
+
+**Via Run Command (non-interactive):**
+
+```bash
+# Check status
+aws ssm send-command \
+  --instance-id i-0f94c1bdc56033056 \
+  --document-name "OpenClawStatus" \
+  --region eu-north-1 \
+  --query 'Command.CommandId' --output text
+
+# Recover (known-good is default)
+aws ssm send-command \
+  --instance-id i-0f94c1bdc56033056 \
+  --document-name "OpenClawRecover" \
+  --parameters '{"Mode":["known-good"]}' \
+  --region eu-north-1 \
+  --query 'Command.CommandId' --output text
+
+# Recover with safe config (if known-good is also broken)
+aws ssm send-command \
+  --instance-id i-0f94c1bdc56033056 \
+  --document-name "OpenClawRecover" \
+  --parameters '{"Mode":["safe"]}' \
+  --region eu-north-1 \
+  --query 'Command.CommandId' --output text
+```
+
+**Via interactive shell:**
+
+```bash
+aws ssm start-session --target i-0f94c1bdc56033056 --region eu-north-1
+
+# Then on the instance:
+openclaw-status           # diagnose
+openclaw-recover          # restore known-good and restart
+openclaw-recover safe     # restore bootstrap config and restart
+```
+
+### Manual checkpoint: promote current config to known-good
+
+After intentional config changes that are confirmed working, lock in the current state:
+
+```bash
+aws ssm send-command \
+  --instance-id i-0f94c1bdc56033056 \
+  --document-name "AWS-RunShellScript" \
+  --parameters '{"commands":["/usr/local/bin/openclaw-save-known-good"]}' \
+  --region eu-north-1 \
+  --query 'Command.CommandId' --output text
+```
+
+This is also done automatically by the watchdog cron every 5 minutes while the service is healthy.
+
+## 11. Teardown
 
 ```bash
 cd infra && terraform destroy

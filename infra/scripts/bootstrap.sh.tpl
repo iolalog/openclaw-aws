@@ -116,6 +116,131 @@ chmod 600 /etc/openclaw/env
 
 echo "[bootstrap] OpenClaw config written"
 
+# ── 5b. Config snapshots and recovery scripts ────────────────────────────────
+# Save a "safe" copy of the bootstrap config (never overwritten after this point)
+# and an initial "known-good" copy (refreshed by cron when service is healthy).
+mkdir -p /var/lib/openclaw
+cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.safe.json
+cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json
+chmod 600 /root/.openclaw/openclaw.safe.json /root/.openclaw/openclaw.known-good.json
+
+# ExecStartPre hook: counts consecutive failures; restores known-good after 3.
+cat > /usr/local/bin/openclaw-prestart <<'PRESTART'
+#!/bin/bash
+FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
+KNOWN_GOOD=/root/.openclaw/openclaw.known-good.json
+LIVE=/root/.openclaw/openclaw.json
+
+count=0
+if [ -f "$FAIL_COUNT_FILE" ]; then
+  count=$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)
+fi
+
+if [ "$count" -ge 3 ]; then
+  echo "[openclaw-prestart] 3+ failures — restoring known-good config"
+  if [ -f "$KNOWN_GOOD" ]; then
+    cp "$KNOWN_GOOD" "$LIVE"
+    echo "[openclaw-prestart] Restored $KNOWN_GOOD -> $LIVE"
+  else
+    echo "[openclaw-prestart] WARNING: known-good not found, cannot restore"
+  fi
+  echo 0 > "$FAIL_COUNT_FILE"
+else
+  echo $((count + 1)) > "$FAIL_COUNT_FILE"
+  echo "[openclaw-prestart] fail-count now $((count + 1))"
+fi
+
+exit 0
+PRESTART
+chmod +x /usr/local/bin/openclaw-prestart
+
+# Manual recovery: openclaw-recover [known-good|safe]
+cat > /usr/local/bin/openclaw-recover <<'RECOVER'
+#!/bin/bash
+MODE="$${1:-known-good}"
+LIVE=/root/.openclaw/openclaw.json
+FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
+
+case "$MODE" in
+  known-good) BACKUP=/root/.openclaw/openclaw.known-good.json ;;
+  safe)       BACKUP=/root/.openclaw/openclaw.safe.json ;;
+  *)
+    echo "Usage: openclaw-recover [known-good|safe]" >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -f "$BACKUP" ]; then
+  echo "ERROR: backup not found: $BACKUP" >&2
+  exit 1
+fi
+
+echo "[openclaw-recover] Restoring $MODE config..."
+cp "$BACKUP" "$LIVE"
+echo 0 > "$FAIL_COUNT_FILE"
+echo "[openclaw-recover] Restarting openclaw-gateway..."
+systemctl restart openclaw-gateway
+sleep 3
+echo "[openclaw-recover] Last 40 journal lines:"
+journalctl -u openclaw-gateway -n 40 --no-pager
+RECOVER
+chmod +x /usr/local/bin/openclaw-recover
+
+# Diagnostics: service state, fail counter, config file inventory, recent logs
+cat > /usr/local/bin/openclaw-status <<'STATUS'
+#!/bin/bash
+FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
+
+echo "=== Service state ==="
+systemctl is-active openclaw-gateway && echo "STATUS: active" || echo "STATUS: $(systemctl is-failed openclaw-gateway 2>/dev/null || echo inactive)"
+systemctl status openclaw-gateway --no-pager -l 2>/dev/null | head -5
+
+echo ""
+echo "=== Fail counter ==="
+if [ -f "$FAIL_COUNT_FILE" ]; then
+  echo "fail-count: $(cat $FAIL_COUNT_FILE)"
+else
+  echo "fail-count: 0 (file not found)"
+fi
+
+echo ""
+echo "=== Config files ==="
+for f in /root/.openclaw/openclaw.json \
+          /root/.openclaw/openclaw.known-good.json \
+          /root/.openclaw/openclaw.safe.json; do
+  if [ -f "$f" ]; then
+    echo "  EXISTS  $(stat -c '%y' "$f" | cut -d. -f1)  $f"
+  else
+    echo "  MISSING $f"
+  fi
+done
+
+echo ""
+echo "=== Last 30 journal lines ==="
+journalctl -u openclaw-gateway -n 30 --no-pager
+STATUS
+chmod +x /usr/local/bin/openclaw-status
+
+# Promote current live config to known-good (only when service is healthy)
+cat > /usr/local/bin/openclaw-save-known-good <<'SAVESCRIPT'
+#!/bin/bash
+LIVE=/root/.openclaw/openclaw.json
+KNOWN_GOOD=/root/.openclaw/openclaw.known-good.json
+FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
+
+if ! systemctl is-active --quiet openclaw-gateway; then
+  echo "ERROR: openclaw-gateway is not active — refusing to promote a potentially broken config" >&2
+  exit 1
+fi
+
+cp "$LIVE" "$KNOWN_GOOD"
+echo 0 > "$FAIL_COUNT_FILE"
+echo "[openclaw-save-known-good] Promoted live config to known-good"
+SAVESCRIPT
+chmod +x /usr/local/bin/openclaw-save-known-good
+
+echo "[bootstrap] Recovery scripts installed"
+
 # ── 6. Clone openclaw-memory repo ────────────────────────────────────────────
 mkdir -p /root/.openclaw
 
@@ -141,6 +266,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/root/.openclaw/workspace
 Environment=HOME=/root
+ExecStartPre=/usr/local/bin/openclaw-prestart
 ExecStart=/usr/bin/openclaw gateway run
 Restart=always
 RestartSec=10
@@ -157,6 +283,16 @@ systemctl enable openclaw-gateway
 systemctl start  openclaw-gateway
 
 echo "[bootstrap] openclaw-gateway service enabled and started"
+
+# ── 7b. Watchdog cron: refresh known-good every 5 min when service is healthy ─
+cat > /etc/cron.d/openclaw-watchdog <<'CRON'
+*/5 * * * * root systemctl is-active --quiet openclaw-gateway && \
+  cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json && \
+  echo 0 > /var/lib/openclaw/fail-count
+CRON
+chmod 644 /etc/cron.d/openclaw-watchdog
+
+echo "[bootstrap] Watchdog cron job installed"
 
 # ── 8. Harden OS ──────────────────────────────────────────────────────────────
 # Disable SSH password auth (access is via SSM Session Manager only)
