@@ -131,7 +131,27 @@ aws ssm send-command \
 
 Config changes are hot-reloaded — no restart needed.
 
-## 7. Verify
+## 7. Allowlist Slack channels (optional)
+
+By default OpenClaw only responds in DMs. To enable it in a channel, the channel must be explicitly allowlisted — it will not respond in channels that aren't configured, even if the bot is a member.
+
+Get the channel ID from Slack (right-click the channel → **Copy link** — the ID is the `CXXXXXXXXXX` segment at the end), then:
+
+```bash
+# Replace C0123456789 with your channel ID
+aws ssm send-command \
+  --instance-id i-XXXXXXXXXXXXXXXXX \
+  --document-name "AWS-RunShellScript" \
+  --parameters '{"commands":["openclaw config set channels.slack.groups.C0123456789.enabled true"]}' \
+  --region eu-north-1 \
+  --query 'Command.CommandId' --output text
+```
+
+Repeat for each channel. Config is hot-reloaded — no restart needed.
+
+> **Thread replies in channels:** The bootstrap sets `replyToModeByChatType.channel = "all"` so the bot always replies in-thread in channels. `"first"` would only thread the opening reply; subsequent replies would go to the main channel. `"off"` disables threading entirely (including explicit `[[reply_to_*]]` tags).
+
+## 8. Verify
 
 ```bash
 # Smoke tests (from repo root)
@@ -141,7 +161,7 @@ uv run pytest tests/smoke/ -v
 journalctl -u openclaw-gateway -f
 ```
 
-## Teardown
+## 9. Teardown
 
 ```bash
 cd infra && terraform destroy

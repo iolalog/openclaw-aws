@@ -74,6 +74,9 @@ openclaw config set channels.slack.mode socket
 #   /root/.openclaw/credentials/slack-default-allowFrom.json
 # To tighten immediately after pairing: openclaw config set channels.slack.groupPolicy allowlist
 openclaw config set channels.slack.groupPolicy open
+# Reply in threads for channel messages (valid values: off, first, all).
+# "first" = only the opening reply is threaded; "all" = every reply is threaded.
+openclaw config set channels.slack.replyToModeByChatType.channel all
 openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
 openclaw config set agents.defaults.model "openrouter/anthropic/claude-sonnet-4-6"
