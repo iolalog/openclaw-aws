@@ -62,6 +62,22 @@ cp infra/terraform.tfvars.example infra/terraform.tfvars
 # Edit with your actual values
 ```
 
+## 3b. Store Anthropic API key in Parameter Store
+
+The bootstrap fetches the Anthropic API key from AWS SSM Parameter Store at boot — it is **not** in `terraform.tfvars`. Store it once before deploying:
+
+```bash
+aws ssm put-parameter \
+  --name "/openclaw/anthropic-api-key" \
+  --value "sk-ant-YOUR_KEY_HERE" \
+  --type SecureString \
+  --region eu-north-1
+```
+
+The instance role is granted `ssm:GetParameter` on `/openclaw/*` by Terraform. The bootstrap writes the key into `/etc/openclaw/env` at first boot.
+
+> Get your key from [console.anthropic.com](https://console.anthropic.com) → API Keys.
+
 ## 4. Deploy
 
 ```bash

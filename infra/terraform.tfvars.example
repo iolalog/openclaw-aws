@@ -1,3 +1,5 @@
+# Note: ANTHROPIC_API_KEY is stored in AWS SSM Parameter Store at /openclaw/anthropic-api-key
+# and fetched by the bootstrap at boot. It is NOT a Terraform variable. See docs/setup.md step 3b.
 openrouter_api_key = "sk-or-REPLACE_ME"
 slack_bot_token    = "xoxb-REPLACE_ME"
 slack_app_token    = "xapp-REPLACE_ME"

@@ -16,8 +16,8 @@ Terraform infrastructure for an OpenClaw autonomous agent on EC2. One instance, 
 | File | Purpose |
 |---|---|
 | `infra/main.tf` | VPC, EC2 instance (t4g.small), security group (no inbound), EIP, DLM snapshot policy |
-| `infra/iam.tf` | EC2 instance role + profile (SSM + Cost Explorer); DLM role |
-| `infra/scripts/bootstrap.sh.tpl` | user_data — installs SSM agent, Node 22, OpenClaw, writes config |
+| `infra/iam.tf` | EC2 instance role + profile (SSM + Cost Explorer + Parameter Store read on `/openclaw/*`); DLM role |
+| `infra/scripts/bootstrap.sh.tpl` | user_data — installs SSM agent, Node 22, OpenClaw, writes config; fetches `ANTHROPIC_API_KEY` from Parameter Store |
 | `infra/variables.tf` | All input variables (`sensitive = true` on secrets) |
 | `tests/smoke/test_openclaw.py` | Post-deploy assertions (SSM online, service active, security group, IAM scope) |
 | `docs/setup.md` | Full setup guide including pre-flight check |
@@ -28,8 +28,8 @@ Terraform infrastructure for an OpenClaw autonomous agent on EC2. One instance, 
 
 - Security group `openclaw-sg` must have zero ingress rules — no inbound traffic
 - Port 22 must never appear in the security group ingress rules
-- EC2 instance role starts with Cost Explorer read-only only — expand per skill, deliberately
-- No secrets in committed files — all injected via `templatefile()` at boot
+- EC2 instance role has Cost Explorer read-only + SSM Parameter Store read on `/openclaw/*` — expand per skill, deliberately
+- No secrets in committed files — Slack/OpenRouter/Gemini keys injected via `templatefile()` at boot; Anthropic key fetched from Parameter Store at boot
 - SSM Session Manager is the only terminal access path
 
 ## Expanding IAM permissions

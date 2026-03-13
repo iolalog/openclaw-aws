@@ -35,6 +35,20 @@ resource "aws_iam_role_policy" "openclaw_cost_explorer" {
   })
 }
 
+resource "aws_iam_role_policy" "openclaw_ssm_parameters" {
+  name = "openclaw-ssm-parameters"
+  role = aws_iam_role.openclaw.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter", "ssm:GetParameters"]
+      Resource = "arn:aws:ssm:eu-north-1::parameter/openclaw/*"
+    }]
+  })
+}
+
 resource "aws_iam_instance_profile" "openclaw" {
   name = "openclaw-instance-profile"
   role = aws_iam_role.openclaw.name

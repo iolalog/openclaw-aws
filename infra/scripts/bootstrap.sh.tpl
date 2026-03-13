@@ -79,7 +79,7 @@ openclaw config set channels.slack.groupPolicy open
 openclaw config set channels.slack.replyToModeByChatType.channel all
 openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
-openclaw config set agents.defaults.model "openrouter/anthropic/claude-sonnet-4-6"
+openclaw config set agents.defaults.model "anthropic/claude-sonnet-4.6"
 # Enable memory search with Google embeddings (text-embedding-004).
 openclaw config set agents.defaults.memorySearch.enabled true
 openclaw config set agents.defaults.memorySearch.provider gemini
@@ -112,6 +112,19 @@ OPENCLAW_MEMORY_REPO=${github_memory_repo}
 NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
 OPENCLAW_NO_RESPAWN=1
 ENVFILE
+
+# Fetch Anthropic API key from Parameter Store (requires ssm:GetParameter on /openclaw/*)
+ANTHROPIC_API_KEY=$(aws ssm get-parameter \
+  --name "/openclaw/anthropic-api-key" \
+  --with-decryption \
+  --query "Parameter.Value" \
+  --output text \
+  --region eu-north-1 2>/dev/null || echo "")
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+  echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /etc/openclaw/env
+else
+  echo "[bootstrap] WARNING: could not fetch /openclaw/anthropic-api-key from Parameter Store"
+fi
 chmod 600 /etc/openclaw/env
 
 echo "[bootstrap] OpenClaw config written"
@@ -267,7 +280,7 @@ Type=simple
 WorkingDirectory=/root/.openclaw/workspace
 Environment=HOME=/root
 ExecStartPre=/usr/local/bin/openclaw-prestart
-ExecStart=/usr/bin/openclaw gateway run
+ExecStart=/usr/bin/node --max-old-space-size=1500 /usr/bin/openclaw gateway run
 Restart=always
 RestartSec=10
 EnvironmentFile=-/etc/openclaw/env
