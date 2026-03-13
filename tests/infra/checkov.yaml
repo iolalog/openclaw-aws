@@ -2,9 +2,9 @@
 # Run: checkov -d infra/ --config-file tests/infra/checkov.yaml
 
 check:
-  - CKV_AWS_88   # Ensure EC2 instance does not have public IP via network interface
   - CKV_AWS_79   # Ensure EC2 instance is not using IMDSv1 (enforce IMDSv2)
   - CKV_AWS_8    # Ensure EC2 launch configuration does not have public IP
 
 skip-check:
-  - CKV2_AWS_41  # IAM role for DLM is service-linked — intentional
+  - CKV_AWS_88   # Intentional: EIP + public subnet required for outbound-only agent (no inbound rules)
+  - CKV2_AWS_41  # Intentional: DLM role uses service-linked policy

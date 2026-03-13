@@ -43,15 +43,23 @@ if [ ! -f /root/.ssh/openclaw_infra ]; then
   ssh-keygen -t ed25519 -f /root/.ssh/openclaw_infra -N "" -C "openclaw-infra-readonly"
 fi
 
+# Pre-populate GitHub's published SSH host keys (avoids TOFU on first connect)
+cat >> /root/.ssh/known_hosts <<'KNOWNHOSTS'
+github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshh1lmVE0eHZBFHvWMnq5lzd1jEJhEJHjLBSfY+1VGR+fGxEzLNMkIWjEVyAe3TGa0BPeGfvzwPjQKPkG8F8cJxqjgPiMOWHDq9J2jqGnkPjzpbN0CbhDOy1z8p8+1XHwEr1vP3a/2/aWvX6dKJR5KuqQgFwBqxB5z6E2K/2ZpIk1oVCi0Qn1LpUg3bXwuDkGk4e/bHH2rNnCR5P1L9gU0t7FQYF4r3EKuMQh0BIH0UiPgM38GhqRDIrVBHj0+HgzrGVPjKXhWdxZF2rqLMXNc3q4wBdCRibZlXA5PzXk3fS1vmpzQqLJNt4Gu2Nkk4mTXj/4CxKLtbp6EHaL7kxiPdlZ4KM4MNHRCc04B8i/Hp8zHtlT4pZA2FVz1O+SX/JOJRSMrHXGqz8WZXEkWFgH6lBTUH8PY81yiMd0T3MgzNb7M1WLKWkrAP+BqHHDKM7tJoH/d1EAmMxsMnBxUQaC3MH5y0FhS7FNq2Q8PBTZ+bCHRzM=
+KNOWNHOSTS
+chmod 600 /root/.ssh/known_hosts
+
 cat > /root/.ssh/config <<'SSHCONFIG'
 Host github.com
   IdentityFile /root/.ssh/openclaw_deploy
-  StrictHostKeyChecking accept-new
+  StrictHostKeyChecking yes
 
 Host github-infra
   HostName github.com
   IdentityFile /root/.ssh/openclaw_infra
-  StrictHostKeyChecking accept-new
+  StrictHostKeyChecking yes
 SSHCONFIG
 
 chmod 600 /root/.ssh/config
@@ -64,10 +72,23 @@ cat /root/.ssh/openclaw_infra.pub
 
 # ── 5. Configure OpenClaw via its native CLI ──────────────────────────────────
 # AWS credentials are provided automatically by the EC2 instance role via IMDS.
-# Only OPENROUTER_API_KEY is injected via EnvironmentFile — no AWS keys on disk.
+# All secrets are fetched from SSM Parameter Store — none are in user_data or Terraform state.
 
-openclaw config set channels.slack.accounts.default.botToken "${slack_bot_token}"
-openclaw config set channels.slack.accounts.default.appToken "${slack_app_token}"
+# ── Fetch all secrets from Parameter Store ────────────────────────────────────
+# Instance role has ssm:GetParameter on /openclaw/*
+_ssm() { aws ssm get-parameter --name "$1" --with-decryption \
+  --query Parameter.Value --output text --region "${aws_region}" 2>/dev/null || echo ""; }
+SLACK_BOT_TOKEN=$(_ssm /openclaw/slack-bot-token)
+SLACK_APP_TOKEN=$(_ssm /openclaw/slack-app-token)
+OPENROUTER_API_KEY=$(_ssm /openclaw/openrouter-api-key)
+GEMINI_API_KEY=$(_ssm /openclaw/gemini-api-key)
+ANTHROPIC_API_KEY=$(_ssm /openclaw/anthropic-api-key)
+for v in SLACK_BOT_TOKEN SLACK_APP_TOKEN OPENROUTER_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY; do
+  [ -z "$${!v}" ] && echo "[bootstrap] WARNING: could not fetch SSM param for $v"
+done
+
+openclaw config set channels.slack.accounts.default.botToken "$SLACK_BOT_TOKEN"
+openclaw config set channels.slack.accounts.default.appToken "$SLACK_APP_TOKEN"
 openclaw config set channels.slack.mode socket
 # groupPolicy starts open so the first DM from the owner triggers the pairing prompt.
 # openclaw pairing approve slack <CODE> writes the owner's user ID to:
@@ -101,30 +122,19 @@ openclaw config set agents.defaults.memorySearch.provider gemini
 #   ~/.openclaw/openclaw.json → agents.defaults.models
 # See: iolalog/openclaw-memory MEMORY.md for the current allowlist.
 
-# Write secrets as a systemd EnvironmentFile.
+# Write systemd EnvironmentFile — non-secret values only in the heredoc.
+# Secrets are appended from shell variables fetched above from Parameter Store.
 # AWS credentials are NOT written here — they come from the instance role via IMDS.
 mkdir -p /etc/openclaw /var/tmp/openclaw-compile-cache
 cat > /etc/openclaw/env <<ENVFILE
-OPENROUTER_API_KEY=${openrouter_api_key}
-GEMINI_API_KEY=${gemini_api_key}
 OPENCLAW_INFRA_REPO=${github_infra_repo}
 OPENCLAW_MEMORY_REPO=${github_memory_repo}
 NODE_COMPILE_CACHE=/var/tmp/openclaw-compile-cache
 OPENCLAW_NO_RESPAWN=1
 ENVFILE
-
-# Fetch Anthropic API key from Parameter Store (requires ssm:GetParameter on /openclaw/*)
-ANTHROPIC_API_KEY=$(aws ssm get-parameter \
-  --name "/openclaw/anthropic-api-key" \
-  --with-decryption \
-  --query "Parameter.Value" \
-  --output text \
-  --region eu-north-1 2>/dev/null || echo "")
-if [ -n "$ANTHROPIC_API_KEY" ]; then
-  echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /etc/openclaw/env
-else
-  echo "[bootstrap] WARNING: could not fetch /openclaw/anthropic-api-key from Parameter Store"
-fi
+# Append secrets from shell variables (not exposed in user_data or Terraform state)
+printf 'OPENROUTER_API_KEY=%s\nGEMINI_API_KEY=%s\nANTHROPIC_API_KEY=%s\n' \
+  "$OPENROUTER_API_KEY" "$GEMINI_API_KEY" "$ANTHROPIC_API_KEY" >> /etc/openclaw/env
 chmod 600 /etc/openclaw/env
 
 echo "[bootstrap] OpenClaw config written"

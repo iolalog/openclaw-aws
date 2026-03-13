@@ -11,14 +11,12 @@ provider "aws" {
   region = var.aws_region
 }
 
+data "aws_caller_identity" "current" {}
+
 locals {
   bootstrap_vars = {
-    region             = var.aws_region
-    openrouter_api_key = var.openrouter_api_key
-    slack_bot_token    = var.slack_bot_token
-    slack_app_token    = var.slack_app_token
+    aws_region         = var.aws_region
     github_memory_repo = var.github_memory_repo
-    gemini_api_key     = var.gemini_api_key
     github_infra_repo  = var.github_infra_repo
   }
 }
@@ -109,6 +107,12 @@ resource "aws_instance" "openclaw" {
   iam_instance_profile   = aws_iam_instance_profile.openclaw.name
   user_data              = templatefile("${path.module}/scripts/bootstrap.sh.tpl", local.bootstrap_vars)
 
+  metadata_options {
+    http_tokens                 = "required"
+    http_endpoint               = "enabled"
+    http_put_response_hop_limit = 1
+  }
+
   root_block_device {
     volume_type = "gp3"
     volume_size = 8
@@ -116,6 +120,8 @@ resource "aws_instance" "openclaw" {
   }
 
   lifecycle {
+    # Bootstrap changes and AMI upgrades require instance replacement or manual intervention.
+    # Update user_data/ami in terraform.tfvars and taint the instance to force replacement.
     ignore_changes = [user_data, ami]
   }
 

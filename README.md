@@ -12,7 +12,7 @@ A single EC2 t4g.small instance (Ubuntu 24.04 arm64, 2GB RAM) running the OpenCl
 # 1. Check for existing deployments first
 cd infra && terraform state list 2>/dev/null
 
-# 2. Copy and fill in secrets
+# 2. Copy and fill in repo URLs / region; store secrets in SSM (see docs/setup.md step 3b)
 cp infra/terraform.tfvars.example infra/terraform.tfvars
 
 # 3. Deploy

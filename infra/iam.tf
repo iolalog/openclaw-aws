@@ -44,7 +44,7 @@ resource "aws_iam_role_policy" "openclaw_ssm_parameters" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-      Resource = "arn:aws:ssm:eu-north-1::parameter/openclaw/*"
+      Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/openclaw/*"
     }]
   })
 }

@@ -59,12 +59,12 @@ gh repo create openclaw-memory --private --description "OpenClaw agent memory an
 
 ```bash
 cp infra/terraform.tfvars.example infra/terraform.tfvars
-# Edit with your actual values
+# Edit with your GitHub repo SSH URLs and region (no secrets — those go in SSM, see step 3b)
 ```
 
-## 3b. Store Anthropic API key in Parameter Store
+## 3b. Store all secrets in Parameter Store
 
-The bootstrap fetches the Anthropic API key from AWS SSM Parameter Store at boot — it is **not** in `terraform.tfvars`. Store it once before deploying:
+All secrets are fetched from AWS SSM Parameter Store at boot — **none** are in `terraform.tfvars`. Store them once before deploying:
 
 ```bash
 aws ssm put-parameter \
@@ -72,11 +72,33 @@ aws ssm put-parameter \
   --value "sk-ant-YOUR_KEY_HERE" \
   --type SecureString \
   --region eu-north-1
+
+aws ssm put-parameter \
+  --name "/openclaw/slack-bot-token" \
+  --value "xoxb-YOUR_TOKEN_HERE" \
+  --type SecureString \
+  --region eu-north-1
+
+aws ssm put-parameter \
+  --name "/openclaw/slack-app-token" \
+  --value "xapp-YOUR_TOKEN_HERE" \
+  --type SecureString \
+  --region eu-north-1
+
+aws ssm put-parameter \
+  --name "/openclaw/openrouter-api-key" \
+  --value "sk-or-YOUR_KEY_HERE" \
+  --type SecureString \
+  --region eu-north-1
+
+aws ssm put-parameter \
+  --name "/openclaw/gemini-api-key" \
+  --value "AIza-YOUR_KEY_HERE" \
+  --type SecureString \
+  --region eu-north-1
 ```
 
-The instance role is granted `ssm:GetParameter` on `/openclaw/*` by Terraform. The bootstrap writes the key into `/etc/openclaw/env` at first boot.
-
-> Get your key from [console.anthropic.com](https://console.anthropic.com) → API Keys.
+The instance role is granted `ssm:GetParameter` on `/openclaw/*` by Terraform. The bootstrap fetches all secrets at first boot and writes them into `/etc/openclaw/env`.
 
 ## 4. Deploy
 
@@ -108,7 +130,7 @@ Add each key in GitHub → repo → **Settings → Deploy keys**.
 Then on the instance, clone the memory repo if bootstrap couldn't (deploy key wasn't added yet):
 
 ```bash
-git clone git@github.com:YOUR_USERNAME/openclaw-memory.git /var/lib/openclaw/memory
+git clone git@github.com:YOUR_USERNAME/openclaw-memory.git /root/.openclaw/workspace
 systemctl restart openclaw-gateway
 ```
 

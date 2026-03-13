@@ -74,6 +74,11 @@ class TestFirewall:
             f"Port 22 is open in security group — it must remain closed"
         )
 
+    def test_imdsv2_enforced(self, ec2_client, managed_instance_id):
+        resp = ec2_client.describe_instances(InstanceIds=[managed_instance_id])
+        opts = resp["Reservations"][0]["Instances"][0].get("MetadataOptions", {})
+        assert opts.get("HttpTokens") == "required", "IMDSv2 must be enforced"
+
 
 class TestIAMScope:
     """Verify the openclaw instance role cannot exceed its minimal policy."""

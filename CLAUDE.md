@@ -17,8 +17,8 @@ Terraform infrastructure for an OpenClaw autonomous agent on EC2. One instance, 
 |---|---|
 | `infra/main.tf` | VPC, EC2 instance (t4g.small), security group (no inbound), EIP, DLM snapshot policy |
 | `infra/iam.tf` | EC2 instance role + profile (SSM + Cost Explorer + Parameter Store read on `/openclaw/*`); DLM role |
-| `infra/scripts/bootstrap.sh.tpl` | user_data — installs SSM agent, Node 22, OpenClaw, writes config; fetches `ANTHROPIC_API_KEY` from Parameter Store |
-| `infra/variables.tf` | All input variables (`sensitive = true` on secrets) |
+| `infra/scripts/bootstrap.sh.tpl` | user_data — installs SSM agent, Node 22, OpenClaw, writes config; fetches all secrets from Parameter Store |
+| `infra/variables.tf` | Non-secret input variables (GitHub repo URLs, AWS region) |
 | `tests/smoke/test_openclaw.py` | Post-deploy assertions (SSM online, service active, security group, IAM scope) |
 | `docs/setup.md` | Full setup guide including pre-flight check |
 | `docs/terraform-state.md` | State recovery procedures |
@@ -29,8 +29,14 @@ Terraform infrastructure for an OpenClaw autonomous agent on EC2. One instance, 
 - Security group `openclaw-sg` must have zero ingress rules — no inbound traffic
 - Port 22 must never appear in the security group ingress rules
 - EC2 instance role has Cost Explorer read-only + SSM Parameter Store read on `/openclaw/*` — expand per skill, deliberately
-- No secrets in committed files — Slack/OpenRouter/Gemini keys injected via `templatefile()` at boot; Anthropic key fetched from Parameter Store at boot
+- No secrets in committed files — all secrets (Slack, OpenRouter, Gemini, Anthropic) fetched from Parameter Store at boot; none in `terraform.tfvars` or user_data
 - SSM Session Manager is the only terminal access path
+- IMDSv2 is required (`http_tokens = "required"`) — protects against SSRF credential theft
+
+## Accepted risks
+
+- **Runs as root**: OpenClaw requires `HOME=/root`; this is a single-purpose host with no other users or services. Mitigation: no inbound network access, SSM-only terminal access.
+- **`ignore_changes = [user_data, ami]`**: Intentional. Bootstrap changes require instance replacement or manual intervention — they are not silently applied on `terraform apply`. To apply bootstrap changes: taint the instance and re-apply.
 
 ## Expanding IAM permissions
 
