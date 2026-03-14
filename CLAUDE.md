@@ -37,6 +37,7 @@ Terraform infrastructure for an OpenClaw autonomous agent on EC2. One instance, 
 
 - **Runs as root**: OpenClaw requires `HOME=/root`; this is a single-purpose host with no other users or services. Mitigation: no inbound network access, SSM-only terminal access.
 - **`ignore_changes = [user_data, ami]`**: Intentional. Bootstrap changes require instance replacement or manual intervention — they are not silently applied on `terraform apply`. To apply bootstrap changes: taint the instance and re-apply.
+- **Unpinned bootstrap dependencies**: `curl … | bash -` from nodesource.com and `npm install -g openclaw` run as root at instance creation with no version pinning or checksum verification. This is a supply-chain exposure on first boot. Accepted because: (a) this is a single-purpose, long-lived host that is rarely re-provisioned; (b) pinning NodeSource's setup script is impractical without maintaining a fork; (c) the exposure window is only at bootstrap time, not ongoing. If re-provisioning becomes frequent, replace with a pre-baked AMI.
 
 ## Expanding IAM permissions
 

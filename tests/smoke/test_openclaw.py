@@ -85,13 +85,11 @@ class TestIAMScope:
 
     def test_role_policy_ce_only(self, iam_client):
         """Instance role inline policy contains only ce:* actions."""
-        import json
         resp = iam_client.get_role_policy(
             RoleName="openclaw-instance-role",
             PolicyName="openclaw-cost-explorer",
         )
-        from urllib.parse import unquote
-        policy = json.loads(unquote(resp["PolicyDocument"]))
+        policy = resp["PolicyDocument"]  # boto3 returns a dict, not URL-encoded text
         actions = []
         for stmt in policy["Statement"]:
             acts = stmt["Action"]
