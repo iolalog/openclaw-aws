@@ -44,3 +44,7 @@ cd .. && uv run pytest tests/smoke/ -v
 | **Total** | **~$14/month** |
 
 1-year reserved t4g.small: ~$8.50/month → ~$9.50/month total — comparable to the previous Lightsail setup ($7/month instance, but with 2× RAM and proper IAM instance role).
+
+## Inspiration
+
+Originally based on [Running OpenClaw on AWS Lightsail](https://awsfundamentals.com/blog/lightsail-openclaw) by awsfundamentals.com. This repo migrated to EC2 for the IAM instance role, more RAM, and ARM64 pricing — the original Lightsail approach is preserved in [`docs/archive/lightsail-setup-plan.md`](docs/archive/lightsail-setup-plan.md).
