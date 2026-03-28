@@ -43,4 +43,4 @@ cd .. && uv run pytest tests/smoke/ -v
 | OpenRouter (codex, gemini, flash fallbacks) | ~$0/month |
 | **Total** | **~$14/month** |
 
-1-year reserved t4g.small: ~$8.50/month → ~$9.50/month total.
+1-year reserved t4g.small: ~$8.50/month → ~$9.50/month total — comparable to the previous Lightsail setup ($7/month instance, but with 2× RAM and proper IAM instance role).

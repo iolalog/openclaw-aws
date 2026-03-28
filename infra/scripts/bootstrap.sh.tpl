@@ -100,7 +100,7 @@ openclaw config set channels.slack.groupPolicy open
 openclaw config set channels.slack.replyToModeByChatType.channel all
 openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
-openclaw config set agents.defaults.model "anthropic/claude-sonnet-4.6"
+openclaw config set agents.defaults.model "anthropic/claude-sonnet-4-6"
 # Enable memory search with Google embeddings (text-embedding-004).
 openclaw config set agents.defaults.memorySearch.enabled true
 openclaw config set agents.defaults.memorySearch.provider gemini
@@ -112,9 +112,9 @@ openclaw config set agents.defaults.memorySearch.provider gemini
 # After deploy, apply via: openclaw config set agents.defaults.models '{...}'
 # or edit ~/.openclaw/openclaw.json directly. Current allowlist (as of 2026-03-08):
 #
-#   sonnet  → openrouter/anthropic/claude-sonnet-4-6         (default: chat + coding)
+#   sonnet  → anthropic/claude-sonnet-4-6                     (default: chat + coding)
 #   codex   → openrouter/openai/gpt-5.3-codex                (agentic coding)
-#   opus    → openrouter/anthropic/claude-opus-4.6           (deep research, design)
+#   opus    → anthropic/claude-opus-4-6                       (deep research, design)
 #   gemini  → openrouter/google/gemini-3.1-pro-preview       (document parsing, multimodal)
 #   flash   → openrouter/google/gemini-3.1-flash-lite-preview (simple/cheap tasks)
 #
@@ -147,13 +147,55 @@ cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.safe.json
 cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json
 chmod 600 /root/.openclaw/openclaw.safe.json /root/.openclaw/openclaw.known-good.json
 
-# ExecStartPre hook: counts consecutive failures; restores known-good after 3.
+# Model ID normalizer: convert dot-notation version suffixes to dash.
+# e.g. "anthropic/claude-sonnet-4.6" -> "anthropic/claude-sonnet-4-6"
+# Anchored to end-of-string so Gemini names (gemini-3.1-flash) and
+# OpenAI names (gpt-5.3-codex) are untouched — only trailing -N.M is fixed.
+cat > /usr/local/bin/openclaw-normalize-models <<'NORMALIZE'
+#!/usr/bin/env python3
+import json, re, sys, shutil
+
+def normalize(s):
+    if '/' not in s:
+        return s
+    return re.sub(r'(-\d+)\.(\d+)$', r'\1-\2', s)
+
+def walk(obj):
+    if isinstance(obj, str): return normalize(obj)
+    if isinstance(obj, list): return [walk(i) for i in obj]
+    if isinstance(obj, dict): return {k: walk(v) for k, v in obj.items()}
+    return obj
+
+path = sys.argv[1]
+with open(path) as f:
+    cfg = json.load(f)
+out = walk(cfg)
+if out != cfg:
+    shutil.copy(path, path + '.prenorm-bak')
+    with open(path, 'w') as f:
+        json.dump(out, f, indent=2)
+    print(f'[openclaw-prestart] Normalized dot-notation model IDs in {path}')
+NORMALIZE
+chmod +x /usr/local/bin/openclaw-normalize-models
+
+# ExecStartPre hook: normalizes model IDs, counts consecutive failures, restores known-good after 3.
 cat > /usr/local/bin/openclaw-prestart <<'PRESTART'
 #!/bin/bash
 FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
 KNOWN_GOOD=/root/.openclaw/openclaw.known-good.json
 LIVE=/root/.openclaw/openclaw.json
 
+# ── Model ID normalization ────────────────────────────────────────────────────
+# Runs on every start so openclaw self-upgrades that change API format cannot break us.
+normalize_model_ids() {
+  local cfg="$1"
+  [ -f "$cfg" ] || return 0
+  python3 /usr/local/bin/openclaw-normalize-models "$cfg"
+}
+
+normalize_model_ids "$LIVE"
+
+# ── Fail count and known-good restoration ─────────────────────────────────────
 count=0
 if [ -f "$FAIL_COUNT_FILE" ]; then
   count=$(cat "$FAIL_COUNT_FILE" 2>/dev/null || echo 0)
@@ -164,6 +206,8 @@ if [ "$count" -ge 3 ]; then
   if [ -f "$KNOWN_GOOD" ]; then
     cp "$KNOWN_GOOD" "$LIVE"
     echo "[openclaw-prestart] Restored $KNOWN_GOOD -> $LIVE"
+    # Normalize the restored config too — known-good may pre-date a format change
+    normalize_model_ids "$LIVE"
   else
     echo "[openclaw-prestart] WARNING: known-good not found, cannot restore"
   fi
@@ -244,7 +288,7 @@ journalctl -u openclaw-gateway -n 30 --no-pager
 STATUS
 chmod +x /usr/local/bin/openclaw-status
 
-# Promote current live config to known-good (only when service is healthy)
+# Promote current live config to known-good (only when service is proven healthy)
 cat > /usr/local/bin/openclaw-save-known-good <<'SAVESCRIPT'
 #!/bin/bash
 LIVE=/root/.openclaw/openclaw.json
@@ -256,9 +300,46 @@ if ! systemctl is-active --quiet openclaw-gateway; then
   exit 1
 fi
 
+# ── Health gate: require proof the current config actually works ───────────────
+# "Active" only means the process is running — it doesn't mean requests succeed.
+# After upgrades the service can appear healthy while every primary-model request
+# silently falls back to the last-resort fallback (seen twice: OOM recovery and
+# 2026.3.24 upgrade). We require two signals before promoting:
+#
+#   1. At least one Slack dialogue was processed since this process started.
+#      (Confirms the Slack integration is live and a real message was handled.)
+#
+#   2. Zero model_not_found errors since start.
+#      (model_not_found means the primary model is broken; requests fall through
+#      to the last fallback. This is the exact failure mode we've seen.)
+
+START_TS=$(systemctl show openclaw-gateway --property=ActiveEnterTimestamp --value 2>/dev/null \
+  | sed 's/ UTC$//')
+
+if [ -z "$START_TS" ]; then
+  echo "ERROR: could not determine service start time — skipping promotion" >&2
+  exit 1
+fi
+
+SLACK_LANES=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null \
+  | grep -c 'lane=session:agent:main:slack:channel:' || true)
+
+if [ "${SLACK_LANES:-0}" -eq 0 ]; then
+  echo "[openclaw-save-known-good] Skipping: no Slack dialogues since service start ($START_TS)"
+  exit 0
+fi
+
+MODEL_NOT_FOUND=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null \
+  | grep -c 'reason=model_not_found' || true)
+
+if [ "${MODEL_NOT_FOUND:-0}" -gt 0 ]; then
+  echo "[openclaw-save-known-good] Skipping: $MODEL_NOT_FOUND model_not_found error(s) since start — primary model is broken"
+  exit 0
+fi
+
 cp "$LIVE" "$KNOWN_GOOD"
 echo 0 > "$FAIL_COUNT_FILE"
-echo "[openclaw-save-known-good] Promoted live config to known-good"
+echo "[openclaw-save-known-good] Promoted live config to known-good (slack_dialogues=$SLACK_LANES, model_errors=0)"
 SAVESCRIPT
 chmod +x /usr/local/bin/openclaw-save-known-good
 
