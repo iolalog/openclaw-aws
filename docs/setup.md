@@ -219,7 +219,7 @@ If the automatic recovery doesn't fire or you want to force it immediately:
 
 1. Open the **AWS Console mobile app**
 2. Hamburger menu → **Systems Manager** → **Run Command** → **Create command**
-3. Search for `OpenClawStatus` → select instance `i-0f94c1bdc56033056` (or by tag `Name=openclaw`) → **Run** → check output to diagnose
+3. Search for `OpenClawStatus` → select your instance (or by tag `Name=openclaw`) → **Run** → check output to diagnose
 4. If recovery is needed: repeat with `OpenClawRecover`, leave **Mode** as `known-good` → **Run**
 5. Follow up with `OpenClawStatus` to confirm the service came up
 
@@ -234,14 +234,14 @@ If the automatic recovery doesn't fire or you want to force it immediately:
 ```bash
 # Check status
 aws ssm send-command \
-  --instance-id i-0f94c1bdc56033056 \
+  --instance-id $(terraform -chdir=infra output -raw instance_id) \
   --document-name "OpenClawStatus" \
   --region eu-north-1 \
   --query 'Command.CommandId' --output text
 
 # Recover (known-good is default)
 aws ssm send-command \
-  --instance-id i-0f94c1bdc56033056 \
+  --instance-id $(terraform -chdir=infra output -raw instance_id) \
   --document-name "OpenClawRecover" \
   --parameters '{"Mode":["known-good"]}' \
   --region eu-north-1 \
@@ -249,7 +249,7 @@ aws ssm send-command \
 
 # Recover with safe config (if known-good is also broken)
 aws ssm send-command \
-  --instance-id i-0f94c1bdc56033056 \
+  --instance-id $(terraform -chdir=infra output -raw instance_id) \
   --document-name "OpenClawRecover" \
   --parameters '{"Mode":["safe"]}' \
   --region eu-north-1 \
@@ -259,7 +259,7 @@ aws ssm send-command \
 **Via interactive shell:**
 
 ```bash
-aws ssm start-session --target i-0f94c1bdc56033056 --region eu-north-1
+aws ssm start-session --target $(terraform -chdir=infra output -raw instance_id) --region eu-north-1
 
 # Then on the instance:
 openclaw-status           # diagnose
@@ -273,7 +273,7 @@ After intentional config changes that are confirmed working, lock in the current
 
 ```bash
 aws ssm send-command \
-  --instance-id i-0f94c1bdc56033056 \
+  --instance-id $(terraform -chdir=infra output -raw instance_id) \
   --document-name "AWS-RunShellScript" \
   --parameters '{"commands":["/usr/local/bin/openclaw-save-known-good"]}' \
   --region eu-north-1 \

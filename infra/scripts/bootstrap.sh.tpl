@@ -65,9 +65,9 @@ SSHCONFIG
 chmod 600 /root/.ssh/config
 
 echo "[bootstrap] SSH keys generated"
-echo "[bootstrap] MEMORY DEPLOY KEY (add to iolalog/openclaw-memory as deploy key, write access):"
+echo "[bootstrap] MEMORY DEPLOY KEY (add to YOUR_USERNAME/openclaw-memory as deploy key, write access):"
 cat /root/.ssh/openclaw_deploy.pub
-echo "[bootstrap] INFRA READ KEY (add to iolalog/openclaw-aws as deploy key, read-only):"
+echo "[bootstrap] INFRA READ KEY (add to YOUR_USERNAME/openclaw-aws as deploy key, read-only):"
 cat /root/.ssh/openclaw_infra.pub
 
 # ── 5. Configure OpenClaw via its native CLI ──────────────────────────────────
@@ -120,7 +120,7 @@ openclaw config set agents.defaults.memorySearch.provider gemini
 #
 # openclaw config set does not support nested JSON objects well — edit the JSON directly:
 #   ~/.openclaw/openclaw.json → agents.defaults.models
-# See: iolalog/openclaw-memory MEMORY.md for the current allowlist.
+# See: YOUR_USERNAME/openclaw-memory MEMORY.md for the current allowlist.
 
 # Write systemd EnvironmentFile — non-secret values only in the heredoc.
 # Secrets are appended from shell variables fetched above from Parameter Store.
