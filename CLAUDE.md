@@ -57,6 +57,11 @@ resource "aws_iam_role_policy" "openclaw_s3" {
 }
 ```
 
+## Cron file gotchas
+
+- **`/etc/cron.d/` commands must be single-line** — Vixie cron (Ubuntu) does not reliably support `\` line continuation in `/etc/cron.d/` files. The watchdog was silently broken for weeks because of this. Always write one complete command per line.
+- **Root's personal crontab vs `/etc/cron.d/`** — OpenClaw sets up jobs in root's personal crontab (`crontab -e`). `/etc/cron.d/openclaw` is for system-level jobs only (update checker). Do not duplicate jobs between the two.
+
 ## Future S3 state migration
 
 See `docs/terraform-state.md`. Do not add the S3 backend block until explicitly asked.

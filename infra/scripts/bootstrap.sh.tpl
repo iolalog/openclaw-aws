@@ -105,6 +105,15 @@ openclaw config set agents.defaults.model "anthropic/claude-sonnet-4-6"
 openclaw config set agents.defaults.memorySearch.enabled true
 openclaw config set agents.defaults.memorySearch.provider gemini
 
+# ── Heartbeat config ──────────────────────────────────────────────────────────
+# target "last" routes heartbeat output to the last used external channel (Slack DM).
+# directPolicy "allow" permits DM-style delivery.
+# lightContext true prevents prompt bloat — heartbeat context must stay small.
+openclaw config set agents.defaults.heartbeat.every "30m"
+openclaw config set agents.defaults.heartbeat.target "last"
+openclaw config set agents.defaults.heartbeat.directPolicy "allow"
+openclaw config set agents.defaults.heartbeat.lightContext true
+
 # ── Model allowlist ───────────────────────────────────────────────────────────
 # Set agents.defaults.models to restrict which models can be used and provide
 # short aliases for /model switching. Only EU/US-hosted providers are included.
@@ -390,9 +399,7 @@ echo "[bootstrap] openclaw-gateway service enabled and started"
 
 # ── 7b. Watchdog cron: refresh known-good every 5 min when service is healthy ─
 cat > /etc/cron.d/openclaw-watchdog <<'CRON'
-*/5 * * * * root systemctl is-active --quiet openclaw-gateway && \
-  cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json && \
-  echo 0 > /var/lib/openclaw/fail-count
+*/5 * * * * root systemctl is-active --quiet openclaw-gateway && cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json && echo 0 > /var/lib/openclaw/fail-count
 CRON
 chmod 644 /etc/cron.d/openclaw-watchdog
 
