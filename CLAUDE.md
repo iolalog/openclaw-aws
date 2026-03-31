@@ -62,6 +62,14 @@ resource "aws_iam_role_policy" "openclaw_s3" {
 - **`/etc/cron.d/` commands must be single-line** — Vixie cron (Ubuntu) does not reliably support `\` line continuation in `/etc/cron.d/` files. The watchdog was silently broken for weeks because of this. Always write one complete command per line.
 - **Root's personal crontab vs `/etc/cron.d/`** — OpenClaw sets up jobs in root's personal crontab (`crontab -e`). `/etc/cron.d/openclaw` is for system-level jobs only (update checker). Do not duplicate jobs between the two.
 
+## OpenClaw upgrades
+
+- **Always run a post-upgrade check** after `npm install -g openclaw`, `openclaw update`, or any self-update on the instance. Use `infra/scripts/post-upgrade-check.sh`.
+- **Validate the config schema** — newer OpenClaw releases can stop auto-migrating old keys. Run `openclaw config schema >/dev/null` and keep `~/.openclaw/openclaw.json` aligned with the current schema.
+- **Re-check the recovery path** — run `/usr/local/bin/openclaw-save-known-good` after a successful Slack round-trip and verify `fail-count` resets to `0` and `openclaw.known-good.json` gets a fresh timestamp.
+- **Re-check Slack behavior** — confirm the gateway reconnects, typing indicators work, and replies land in the intended thread after restart.
+- **Treat log markers as unstable** — the `openclaw-save-known-good` gate is compatibility-tuned for current OpenClaw logs. Re-verify it after upgrades instead of assuming old journal markers still exist.
+
 ## Future S3 state migration
 
 See `docs/terraform-state.md`. Do not add the S3 backend block until explicitly asked.

@@ -199,6 +199,18 @@ uv run pytest tests/smoke/ -v
 journalctl -u openclaw-gateway -f
 ```
 
+## 8b. Post-upgrade check
+
+After any OpenClaw upgrade on the instance, run the repo helper:
+
+```bash
+infra/scripts/post-upgrade-check.sh
+```
+
+It checks the installed OpenClaw version, validates the live config schema, verifies the watchdog cron file, prints the heartbeat block, runs `openclaw-save-known-good`, shows config timestamps, and dumps recent gateway logs.
+
+If the upgrade included a gateway restart, also send one real Slack message and rerun the check. `known-good` should get a fresh timestamp and `fail-count` should return to `0`.
+
 ## 9. Recovery (break-glass)
 
 OpenClaw can modify its own gateway config. If it sets an invalid value the gateway crashes into a restart loop and becomes unreachable via Slack. Three recovery tiers are available — pick the first one that applies.
