@@ -303,6 +303,7 @@ cat > /usr/local/bin/openclaw-save-known-good <<'SAVESCRIPT'
 LIVE=/root/.openclaw/openclaw.json
 KNOWN_GOOD=/root/.openclaw/openclaw.known-good.json
 FAIL_COUNT_FILE=/var/lib/openclaw/fail-count
+MIN_UPTIME_SECS=90
 
 if ! systemctl is-active --quiet openclaw-gateway; then
   echo "ERROR: openclaw-gateway is not active — refusing to promote a potentially broken config" >&2
@@ -321,34 +322,63 @@ fi
 #   2. Zero model_not_found errors since start.
 #      (model_not_found means the primary model is broken; requests fall through
 #      to the last fallback. This is the exact failure mode we've seen.)
+#
+# Newer OpenClaw builds no longer emit the old Slack dialogue marker reliably.
+# We therefore use a layered gate:
+#
+#   - Prefer explicit "real traffic" markers when present.
+#   - Otherwise, allow promotion after a short stable window if there are no
+#     known bad signals (model_not_found, overloads, stuck typing TTL).
 
 START_TS=$(systemctl show openclaw-gateway --property=ActiveEnterTimestamp --value 2>/dev/null \
   | sed 's/ UTC$//')
+ACTIVE_ENTER_SECS=$(systemctl show openclaw-gateway --property=ActiveEnterTimestampMonotonic --value 2>/dev/null || echo 0)
+NOW_SECS=$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)
 
 if [ -z "$START_TS" ]; then
   echo "ERROR: could not determine service start time — skipping promotion" >&2
   exit 1
 fi
 
-SLACK_LANES=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null \
-  | grep -c 'lane=session:agent:main:slack:channel:' || true)
-
-if [ "${SLACK_LANES:-0}" -eq 0 ]; then
-  echo "[openclaw-save-known-good] Skipping: no Slack dialogues since service start ($START_TS)"
-  exit 0
+LOG_SINCE_START=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null || true)
+UPTIME_SECS=0
+if [ -n "${ACTIVE_ENTER_SECS:-}" ] && [ "${ACTIVE_ENTER_SECS:-0}" -gt 0 ] 2>/dev/null; then
+  UPTIME_SECS=$((NOW_SECS - (ACTIVE_ENTER_SECS / 1000000)))
 fi
 
-MODEL_NOT_FOUND=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null \
-  | grep -c 'reason=model_not_found' || true)
+SLACK_ACTIVITY=$(
+  printf '%s\n' "$LOG_SINCE_START" \
+    | grep -E -c 'lane=session:agent:main:slack:channel:|embedded run agent end|typing TTL reached' || true
+)
+
+MODEL_NOT_FOUND=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'reason=model_not_found' || true)
+OVERLOADED=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'overloaded_error\|error=The AI service is temporarily overloaded' || true)
+TYPING_TTL=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'typing TTL reached' || true)
 
 if [ "${MODEL_NOT_FOUND:-0}" -gt 0 ]; then
   echo "[openclaw-save-known-good] Skipping: $MODEL_NOT_FOUND model_not_found error(s) since start — primary model is broken"
   exit 0
 fi
 
+if [ "${OVERLOADED:-0}" -gt 0 ]; then
+  echo "[openclaw-save-known-good] Skipping: $OVERLOADED overload error(s) since start"
+  exit 0
+fi
+
+if [ "${SLACK_ACTIVITY:-0}" -eq 0 ]; then
+  if [ "${UPTIME_SECS:-0}" -lt "$MIN_UPTIME_SECS" ]; then
+    echo "[openclaw-save-known-good] Skipping: no explicit Slack activity markers yet and uptime is only ${UPTIME_SECS}s"
+    exit 0
+  fi
+  echo "[openclaw-save-known-good] No explicit Slack activity markers found; promoting after ${UPTIME_SECS}s of stable uptime with zero known model errors"
+elif [ "${TYPING_TTL:-0}" -gt 0 ]; then
+  echo "[openclaw-save-known-good] Skipping: saw $TYPING_TTL typing TTL event(s) since start — at least one Slack run stalled"
+  exit 0
+fi
+
 cp "$LIVE" "$KNOWN_GOOD"
 echo 0 > "$FAIL_COUNT_FILE"
-echo "[openclaw-save-known-good] Promoted live config to known-good (slack_dialogues=$SLACK_LANES, model_errors=0)"
+echo "[openclaw-save-known-good] Promoted live config to known-good (slack_activity=$SLACK_ACTIVITY, model_errors=0, overload_errors=0, uptime=${UPTIME_SECS}s)"
 SAVESCRIPT
 chmod +x /usr/local/bin/openclaw-save-known-good
 
@@ -399,7 +429,7 @@ echo "[bootstrap] openclaw-gateway service enabled and started"
 
 # ── 7b. Watchdog cron: refresh known-good every 5 min when service is healthy ─
 cat > /etc/cron.d/openclaw-watchdog <<'CRON'
-*/5 * * * * root systemctl is-active --quiet openclaw-gateway && cp /root/.openclaw/openclaw.json /root/.openclaw/openclaw.known-good.json && echo 0 > /var/lib/openclaw/fail-count
+*/5 * * * * root /usr/local/bin/openclaw-save-known-good
 CRON
 chmod 644 /etc/cron.d/openclaw-watchdog
 

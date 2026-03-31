@@ -209,7 +209,7 @@ The service has a self-healing loop built in:
 
 - `Restart=always` — systemd restarts on any exit
 - `ExecStartPre=/usr/local/bin/openclaw-prestart` — counts consecutive failures; after **3 failed starts** it automatically restores the known-good config and resets the counter
-- A cron job (`/etc/cron.d/openclaw-watchdog`) refreshes the known-good snapshot every 5 minutes while the service is healthy
+- A cron job (`/etc/cron.d/openclaw-watchdog`) runs `/usr/local/bin/openclaw-save-known-good` every 5 minutes and only promotes the live config after the health gates pass
 
 In most cases the service heals itself within 30–60 seconds. No action needed — just wait.
 
@@ -224,7 +224,7 @@ If the automatic recovery doesn't fire or you want to force it immediately:
 5. Follow up with `OpenClawStatus` to confirm the service came up
 
 **Which Mode to pick:**
-- `known-good` — last config that was running without errors (refreshed by cron every 5 min while healthy). Use this first.
+- `known-good` — last config promoted by the watchdog after either detecting real post-start activity or observing a short stable window with zero known model/runtime errors. Use this first.
 - `safe` — factory config written at bootstrap time. Use this if known-good is also broken (e.g. a bad model string was saved before the cron refreshed).
 
 ### Tier 3 — SSM shell (laptop fallback)
@@ -280,7 +280,7 @@ aws ssm send-command \
   --query 'Command.CommandId' --output text
 ```
 
-This is also done automatically by the watchdog cron every 5 minutes while the service is healthy.
+This is also done automatically by the watchdog cron every 5 minutes, but only after the same health gates pass. On newer OpenClaw builds that no longer emit the older Slack dialogue markers reliably, the script falls back to a short stable-uptime gate with zero known errors instead of raw process liveness.
 
 ## 11. Teardown
 
