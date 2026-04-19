@@ -37,7 +37,7 @@ cd .. && uv run pytest tests/smoke/ -v
 | Component | Cost |
 |---|---|
 | EC2 t4g.small (2GB RAM, arm64) | ~$13/month |
-| EBS gp3 8GB root | ~$0.70/month |
+| EBS gp3 16GB root | ~$1.28/month |
 | DLM daily AMI snapshots (7-day retain) | ~$0.40/month |
 | Anthropic API (haiku/sonnet/opus — same price as OpenRouter) | ~$0–2/month |
 | OpenRouter (codex, gemini, flash fallbacks) | ~$0/month |
