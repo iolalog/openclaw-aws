@@ -16,34 +16,13 @@ cd infra && terraform state list 2>/dev/null
 
 Already completed if you have `xoxb-` and `xapp-` tokens. If not:
 
-1. Go to api.slack.com/apps → Create New App → From scratch
-2. Enable Socket Mode under **Settings → Socket Mode** → generate App-Level Token (`xapp-`) with `connections:write` scope
-3. Under **OAuth & Permissions**, add Bot Token Scopes:
-   - `chat:write`
-   - `im:history`, `im:read`, `im:write`
-   - `channels:history`, `groups:history`, `mpim:history`
-   - `channels:read`, `groups:read`, `mpim:read`
-   - `users:read`
-   - `app_mentions:read`
-   - `assistant:write` (enables typing indicators — also requires Agents & AI Apps feature, see step 7)
-   - `reactions:read`, `reactions:write`
-   - `pins:read`, `pins:write`
-   - `emoji:read`
-   - `commands`
-   - `files:read`, `files:write`
-   - `mpim:write`
-4. Under **Event Subscriptions → Subscribe to bot events**, add:
-   - `message.im`, `message.channels`, `message.groups`, `message.mpim`
-   - `app_mention`
-   - `reaction_added`, `reaction_removed`
-   - `member_joined_channel`, `member_left_channel`
-   - `channel_rename`
-   - `pin_added`, `pin_removed`
-5. Install app to workspace → copy Bot Token (`xoxb-`)
-6. Under **App Home → Show Tabs**, enable **Messages Tab** and allow DMs
-7. (Optional) Under **App Features**, enable **Agents & AI Apps** for typing indicators
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
+2. Select your workspace → paste the contents of [`docs/slack-manifest.json`](slack-manifest.json) → **Next** → **Create**
+3. **Basic Information** → **App-Level Tokens** → **Generate Token and Scopes** → name it (e.g. "openclaw-socket") → add scope `connections:write` → **Generate** → copy the token (`xapp-...`)
+4. **Install to Workspace** → **Allow** → copy the **Bot User OAuth Token** (`xoxb-...`)
+5. (Optional) **App Features** → **Agents & AI Apps** → enable for typing indicators (`assistant:write` scope is already included in the manifest)
 
-> **After any scope or event changes: reinstall the app to the workspace.**
+> The manifest includes all required scopes and events. No manual scope/event configuration needed.
 
 ## 2. GitHub Repos
 
