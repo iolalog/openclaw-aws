@@ -384,6 +384,31 @@ chmod +x /usr/local/bin/openclaw-save-known-good
 
 echo "[bootstrap] Recovery scripts installed"
 
+# Upgrade wrapper: stops the service, installs latest openclaw, cleans npm cache, restarts.
+# OpenClaw must always use this instead of running npm install -g directly — upgrading
+# in-flight corrupts the package because node holds the module files open while npm
+# tries to replace them.
+cat > /usr/local/bin/openclaw-upgrade <<'UPGRADE'
+#!/bin/bash
+set -uo pipefail
+
+trap 'echo "[openclaw-upgrade] ERROR — restarting service with existing install"; systemctl start openclaw-gateway.service || true' ERR
+
+echo "[openclaw-upgrade] stopping service..."
+systemctl stop openclaw-gateway.service
+echo "[openclaw-upgrade] installing latest openclaw..."
+npm install -g openclaw
+echo "[openclaw-upgrade] cleaning npm cache..."
+npm cache clean --force
+echo "[openclaw-upgrade] version: $(openclaw --version 2>&1 | head -1)"
+echo "[openclaw-upgrade] starting service..."
+systemctl start openclaw-gateway.service
+echo "[openclaw-upgrade] done."
+UPGRADE
+chmod +x /usr/local/bin/openclaw-upgrade
+
+echo "[bootstrap] Upgrade wrapper installed"
+
 # ── 6. Clone openclaw-memory repo ────────────────────────────────────────────
 mkdir -p /root/.openclaw
 

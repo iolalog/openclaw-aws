@@ -64,7 +64,8 @@ resource "aws_iam_role_policy" "openclaw_s3" {
 
 ## OpenClaw upgrades
 
-- **Always run a post-upgrade check** after `npm install -g openclaw`, `openclaw update`, or any self-update on the instance. Use `infra/scripts/post-upgrade-check.sh`.
+- **Always upgrade via `/usr/local/bin/openclaw-upgrade`** — never `npm install -g openclaw` or `openclaw update` directly. Running npm while the gateway is live corrupts the package (node holds module files open; npm can't replace them). The wrapper does stop → install → cache clean → start, and restarts the service even if install fails.
+- **Always run a post-upgrade check** after any upgrade. Use `infra/scripts/post-upgrade-check.sh` (runs externally from a dev machine with Terraform state).
 - **Validate the config schema** — newer OpenClaw releases can stop auto-migrating old keys. Run `openclaw config schema >/dev/null` and keep `~/.openclaw/openclaw.json` aligned with the current schema.
 - **Re-check the recovery path** — run `/usr/local/bin/openclaw-save-known-good` after a successful Slack round-trip and verify `fail-count` resets to `0` and `openclaw.known-good.json` gets a fresh timestamp.
 - **Re-check Slack behavior** — confirm the gateway reconnects, typing indicators work, and replies land in the intended thread after restart.
