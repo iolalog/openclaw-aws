@@ -460,6 +460,12 @@ chmod 644 /etc/cron.d/openclaw-watchdog
 
 echo "[bootstrap] Watchdog cron job installed"
 
+# Weekly npm cache clean — prevents disk buildup between openclaw upgrades
+printf '# Weekly npm cache clean to prevent disk buildup between openclaw upgrades\n0 3 * * 0  root  npm cache clean --force\n' > /etc/cron.d/npm-cache-clean
+chmod 644 /etc/cron.d/npm-cache-clean
+
+echo "[bootstrap] npm cache clean cron installed"
+
 # ── 8. Harden OS ──────────────────────────────────────────────────────────────
 # Disable SSH password auth (access is via SSM Session Manager only)
 if ! grep -q "^PasswordAuthentication no" /etc/ssh/sshd_config; then
