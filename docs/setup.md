@@ -19,8 +19,9 @@ Already completed if you have `xoxb-` and `xapp-` tokens. If not:
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From a manifest**
 2. Select your workspace → paste the contents of [`docs/slack-manifest.json`](slack-manifest.json) → **Next** → **Create**
 3. **Basic Information** → **App-Level Tokens** → **Generate Token and Scopes** → name it (e.g. "openclaw-socket") → add scope `connections:write` → **Generate** → copy the token (`xapp-...`)
-4. **Install to Workspace** → **Allow** → copy the **Bot User OAuth Token** (`xoxb-...`)
-5. (Optional) **App Features** → **Agents & AI Apps** → enable for typing indicators (`assistant:write` scope is already included in the manifest)
+4. **Basic Information** → **Display Information** → upload [`docs/smaug-avatar-1.jpg`](smaug-avatar-1.jpg) as the app icon (or `smaug-avatar-2.jpg`)
+5. **Install to Workspace** → **Allow** → copy the **Bot User OAuth Token** (`xoxb-...`)
+6. (Optional) **App Features** → **Agents & AI Apps** → enable for typing indicators (`assistant:write` scope is already included in the manifest)
 
 > The manifest includes all required scopes and events. No manual scope/event configuration needed.
 
