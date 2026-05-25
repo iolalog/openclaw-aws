@@ -12,6 +12,8 @@ COMMANDS_JSON=$(cat <<'JSON'
     "openclaw --version || true",
     "echo '=== schema ==='",
     "openclaw config schema >/dev/null && echo schema-ok",
+    "echo '=== plugins ==='",
+    "openclaw channels list || true",
     "echo '=== service ==='",
     "systemctl is-active openclaw-gateway",
     "echo '=== watchdog ==='",
