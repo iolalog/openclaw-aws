@@ -354,7 +354,7 @@ fi
 
 LOG_SINCE_START=$(journalctl -u openclaw-gateway --since "$START_TS" --no-pager -q 2>/dev/null || true)
 UPTIME_SECS=0
-if [ -n "${ACTIVE_ENTER_SECS:-}" ] && [ "${ACTIVE_ENTER_SECS:-0}" -gt 0 ] 2>/dev/null; then
+if [ -n "$${ACTIVE_ENTER_SECS:-}" ] && [ "$${ACTIVE_ENTER_SECS:-0}" -gt 0 ] 2>/dev/null; then
   UPTIME_SECS=$((NOW_SECS - (ACTIVE_ENTER_SECS / 1000000)))
 fi
 
@@ -367,30 +367,30 @@ MODEL_NOT_FOUND=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'reason=model_not_f
 OVERLOADED=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'overloaded_error\|error=The AI service is temporarily overloaded' || true)
 TYPING_TTL=$(printf '%s\n' "$LOG_SINCE_START" | grep -c 'typing TTL reached' || true)
 
-if [ "${MODEL_NOT_FOUND:-0}" -gt 0 ]; then
+if [ "$${MODEL_NOT_FOUND:-0}" -gt 0 ]; then
   echo "[openclaw-save-known-good] Skipping: $MODEL_NOT_FOUND model_not_found error(s) since start — primary model is broken"
   exit 0
 fi
 
-if [ "${OVERLOADED:-0}" -gt 0 ]; then
+if [ "$${OVERLOADED:-0}" -gt 0 ]; then
   echo "[openclaw-save-known-good] Skipping: $OVERLOADED overload error(s) since start"
   exit 0
 fi
 
-if [ "${SLACK_ACTIVITY:-0}" -eq 0 ]; then
-  if [ "${UPTIME_SECS:-0}" -lt "$MIN_UPTIME_SECS" ]; then
-    echo "[openclaw-save-known-good] Skipping: no explicit Slack activity markers yet and uptime is only ${UPTIME_SECS}s"
+if [ "$${SLACK_ACTIVITY:-0}" -eq 0 ]; then
+  if [ "$${UPTIME_SECS:-0}" -lt "$MIN_UPTIME_SECS" ]; then
+    echo "[openclaw-save-known-good] Skipping: no explicit Slack activity markers yet and uptime is only $${UPTIME_SECS}s"
     exit 0
   fi
-  echo "[openclaw-save-known-good] No explicit Slack activity markers found; promoting after ${UPTIME_SECS}s of stable uptime with zero known model errors"
-elif [ "${TYPING_TTL:-0}" -gt 0 ]; then
+  echo "[openclaw-save-known-good] No explicit Slack activity markers found; promoting after $${UPTIME_SECS}s of stable uptime with zero known model errors"
+elif [ "$${TYPING_TTL:-0}" -gt 0 ]; then
   echo "[openclaw-save-known-good] Skipping: saw $TYPING_TTL typing TTL event(s) since start — at least one Slack run stalled"
   exit 0
 fi
 
 cp "$LIVE" "$KNOWN_GOOD"
 echo 0 > "$FAIL_COUNT_FILE"
-echo "[openclaw-save-known-good] Promoted live config to known-good (slack_activity=$SLACK_ACTIVITY, model_errors=0, overload_errors=0, uptime=${UPTIME_SECS}s)"
+echo "[openclaw-save-known-good] Promoted live config to known-good (slack_activity=$SLACK_ACTIVITY, model_errors=0, overload_errors=0, uptime=$${UPTIME_SECS}s)"
 SAVESCRIPT
 chmod +x /usr/local/bin/openclaw-save-known-good
 

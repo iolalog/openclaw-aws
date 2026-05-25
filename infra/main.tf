@@ -105,7 +105,9 @@ resource "aws_instance" "openclaw" {
   subnet_id              = aws_subnet.openclaw.id
   vpc_security_group_ids = [aws_security_group.openclaw.id]
   iam_instance_profile   = aws_iam_instance_profile.openclaw.name
-  user_data              = templatefile("${path.module}/scripts/bootstrap.sh.tpl", local.bootstrap_vars)
+  # Script exceeds EC2's 16KB raw limit; gzip+base64 brings it to ~11KB.
+  # ignore_changes covers both attributes so existing instances are never replaced by bootstrap edits.
+  user_data_base64 = base64gzip(templatefile("${path.module}/scripts/bootstrap.sh.tpl", local.bootstrap_vars))
 
   metadata_options {
     http_tokens                 = "required"
@@ -122,7 +124,7 @@ resource "aws_instance" "openclaw" {
   lifecycle {
     # Bootstrap changes and AMI upgrades require instance replacement or manual intervention.
     # Update user_data/ami in terraform.tfvars and taint the instance to force replacement.
-    ignore_changes = [user_data, ami]
+    ignore_changes = [user_data, user_data_base64, ami]
   }
 
   tags = { Name = "openclaw" }
