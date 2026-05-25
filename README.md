@@ -28,9 +28,14 @@ cd .. && uv run pytest tests/smoke/ -v
 
 - [`docs/setup.md`](docs/setup.md) — full setup guide (includes pre-flight check)
 - [`docs/terraform-state.md`](docs/terraform-state.md) — state management and recovery
+- [`docs/peer-monitoring.md`](docs/peer-monitoring.md) — two agents watching each other via SSM
 - [`docs/messaging-channel-decision.md`](docs/messaging-channel-decision.md) — why Slack now, Matrix later
 - [`docs/use-cases.md`](docs/use-cases.md) — capabilities and IAM expansion pattern
 - [`docs/archive/`](docs/archive/) — legacy Lightsail docs and one-time migration guide
+
+## Peer agent
+
+This instance runs alongside [hermes-aws](https://github.com/iolalog/hermes-aws) — a companion agent on a separate EC2 instance. The two watch each other for failures using AWS SSM: OpenClaw polls Hermes hourly and DMs the owner if Hermes goes dark. See [`docs/peer-monitoring.md`](docs/peer-monitoring.md) for how to set this up between any two agent instances.
 
 ## Cost
 

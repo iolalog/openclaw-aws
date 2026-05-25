@@ -13,3 +13,18 @@ variable "github_infra_repo" {
   description = "SSH URL of the private openclaw-aws infra repo (read-only reference for OpenClaw self-inspection)"
   type        = string
 }
+
+# ── Peer monitoring (optional) ────────────────────────────────────────────────
+# Set these to enable OpenClaw→peer SSM health checks. See docs/peer-monitoring.md.
+
+variable "peer_instance_id" {
+  description = "EC2 instance ID of the peer agent to monitor (e.g. i-0abc123). Leave empty to skip."
+  type        = string
+  default     = ""
+}
+
+variable "peer_aws_account_id" {
+  description = "AWS account ID where the peer instance runs. Defaults to the current account when empty."
+  type        = string
+  default     = ""
+}
