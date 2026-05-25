@@ -29,6 +29,10 @@ npm install -g openclaw --no-fund --no-audit
 
 echo "[bootstrap] OpenClaw $(openclaw --version 2>/dev/null || echo '(version check failed)') installed"
 
+# As of 2026.5.22 Slack is an installable plugin, no longer bundled.
+openclaw plugins install @openclaw/slack
+echo "[bootstrap] @openclaw/slack plugin installed"
+
 # ── 4. Generate Ed25519 SSH keys ─────────────────────────────────────────────
 mkdir -p /root/.ssh
 chmod 700 /root/.ssh
@@ -400,6 +404,8 @@ echo "[openclaw-upgrade] cleaning stale npm temp dirs..."
 rm -rf /usr/lib/node_modules/.openclaw-*
 echo "[openclaw-upgrade] installing latest openclaw..."
 npm install -g openclaw
+echo "[openclaw-upgrade] reinstalling plugins..."
+openclaw plugins install @openclaw/slack
 echo "[openclaw-upgrade] cleaning npm cache..."
 npm cache clean --force
 echo "[openclaw-upgrade] version: $(openclaw --version 2>&1 | head -1)"
