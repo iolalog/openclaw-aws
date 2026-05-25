@@ -32,6 +32,9 @@ echo "[bootstrap] OpenClaw $(openclaw --version 2>/dev/null || echo '(version ch
 # As of 2026.5.22 Slack is an installable plugin, no longer bundled.
 openclaw plugins install @openclaw/slack
 echo "[bootstrap] @openclaw/slack plugin installed"
+# Lock allowlist — only the explicitly installed Slack plugin may load
+python3 -c "import json; p='/root/.openclaw/openclaw.json'; d=json.load(open(p)); d.setdefault('plugins',{})['allow']=['@openclaw/slack']; json.dump(d,open(p,'w'),indent=2)"
+echo "[bootstrap] plugins.allow set to [@openclaw/slack]"
 
 # ── 4. Generate Ed25519 SSH keys ─────────────────────────────────────────────
 mkdir -p /root/.ssh
