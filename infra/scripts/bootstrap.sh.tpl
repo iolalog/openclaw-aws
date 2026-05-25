@@ -396,6 +396,8 @@ trap 'echo "[openclaw-upgrade] ERROR — restarting service with existing instal
 
 echo "[openclaw-upgrade] stopping service..."
 systemctl stop openclaw-gateway.service
+echo "[openclaw-upgrade] cleaning stale npm temp dirs..."
+rm -rf /usr/lib/node_modules/.openclaw-*
 echo "[openclaw-upgrade] installing latest openclaw..."
 npm install -g openclaw
 echo "[openclaw-upgrade] cleaning npm cache..."
@@ -406,6 +408,22 @@ systemctl start openclaw-gateway.service
 echo "[openclaw-upgrade] done."
 UPGRADE
 chmod +x /usr/local/bin/openclaw-upgrade
+
+# Async upgrade launcher: safe to call from inside the gateway.
+# Runs openclaw-upgrade in a detached systemd transient unit so the wrapper
+# survives the gateway stopping (stopping the gateway sends SIGTERM to all
+# child processes, which would kill the wrapper before npm install runs).
+cat > /usr/local/bin/openclaw-upgrade-async <<'ASYNC'
+#!/bin/bash
+LOG=/var/log/openclaw-upgrade.log
+echo "[$(date -u +%FT%TZ)] upgrade requested" >> "$LOG"
+systemd-run --no-block --unit=openclaw-upgrade-job \
+  --property="StandardOutput=append:$LOG" \
+  --property="StandardError=append:$LOG" \
+  /usr/local/bin/openclaw-upgrade
+echo "[openclaw-upgrade-async] Upgrade queued. Log: $LOG"
+ASYNC
+chmod +x /usr/local/bin/openclaw-upgrade-async
 
 echo "[bootstrap] Upgrade wrapper installed"
 
