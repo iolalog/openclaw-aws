@@ -97,8 +97,16 @@ openclaw config set channels.slack.mode socket
 # groupPolicy starts open so the first DM from the owner triggers the pairing prompt.
 # openclaw pairing approve slack <CODE> writes the owner's user ID to:
 #   /root/.openclaw/credentials/slack-default-allowFrom.json
-# To tighten immediately after pairing: openclaw config set channels.slack.groupPolicy allowlist
+# To tighten immediately after pairing:
+#   openclaw config set channels.slack.groupPolicy allowlist
+#   openclaw config set channels.slack.allowFrom '["<OWNER_SLACK_USER_ID>", "<OTHER_BOT_USER_ID>"]'
+# channels.slack.allowFrom is required for bot-to-bot channel messages: the plugin checks
+# that at least one "owner" (U-prefixed ID) from allowFrom is a member of the channel before
+# accepting a bot message. The credentials file (slack-default-allowFrom.json) is only used
+# for DM pairing — it has no effect on channel-level bot authorization.
 openclaw config set channels.slack.groupPolicy open
+# Allow bot messages in channels (needed for bot-to-bot communication e.g. with Hermes).
+openclaw config set channels.slack.allowBots true
 # Reply in threads for channel messages (valid values: off, first, all).
 # "first" = only the opening reply is threaded; "all" = every reply is threaded.
 openclaw config set channels.slack.replyToModeByChatType.channel all
