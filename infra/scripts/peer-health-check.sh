@@ -1,7 +1,9 @@
 #!/bin/bash
 # Checks a peer agent's health via SSM.
 # Reads the peer's heartbeat file and confirms the gateway process is alive.
-# Alerts after 2 consecutive failures. Silent on success. No LLM.
+# Tracks consecutive failures in STATE_FILE but does NOT send Slack alerts —
+# alerting is each instance's own responsibility via its own heartbeat-check script.
+# Silent on success. No LLM.
 #
 # Deploy this to the monitoring instance via SSM (see docs/peer-monitoring.md).
 # Replace PEER_INSTANCE_PLACEHOLDER with the actual peer EC2 instance ID.
