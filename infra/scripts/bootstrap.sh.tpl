@@ -117,14 +117,11 @@ openclaw config set agents.defaults.model "anthropic/claude-sonnet-4-6"
 openclaw config set agents.defaults.memorySearch.enabled true
 openclaw config set agents.defaults.memorySearch.provider gemini
 
-# ── Heartbeat config ──────────────────────────────────────────────────────────
-# target "last" routes heartbeat output to the last used external channel (Slack DM).
-# directPolicy "allow" permits DM-style delivery.
-# lightContext true prevents prompt bloat — heartbeat context must stay small.
-openclaw config set agents.defaults.heartbeat.every "30m"
-openclaw config set agents.defaults.heartbeat.target "last"
-openclaw config set agents.defaults.heartbeat.directPolicy "allow"
-openclaw config set agents.defaults.heartbeat.lightContext true
+# ── Heartbeat: OpenClaw LLM heartbeat is deliberately disabled ────────────────
+# Health monitoring is handled by the deterministic openclaw-heartbeat-check.sh
+# script (installed below) which uses Slack API directly — no LLM involved.
+# Never re-enable the LLM heartbeat: it sends 168K tokens every 30 minutes
+# regardless of lightContext, costing ~$48/day with no diagnostic value.
 
 # ── Model allowlist ───────────────────────────────────────────────────────────
 # Set agents.defaults.models to restrict which models can be used and provide
@@ -491,6 +488,126 @@ CRON
 chmod 644 /etc/cron.d/openclaw-watchdog
 
 echo "[bootstrap] Watchdog cron job installed"
+
+# ── 7c. Deterministic gateway health check (no LLM) ──────────────────────────
+# Runs every 10 minutes. On failure: 3 attempts with exponential backoff
+# (0s / 60s / 120s between tries), then alerts via Slack API if all fail.
+# Sends a recovery notification when the service comes back up.
+# Never uses the OpenClaw LLM — Slack API only.
+cat > /usr/local/bin/openclaw-heartbeat-check <<'HEARTBEAT'
+#!/bin/bash
+set -uo pipefail
+
+STATE_DIR=/var/lib/openclaw
+ALERT_SENT_FILE="$STATE_DIR/heartbeat-alert-sent"
+LOCK_FILE=/var/lock/openclaw-heartbeat.lock
+LOG=/var/log/openclaw-heartbeat.log
+GATEWAY_PORT=18789
+ALERT_REPEAT_SECS=3600
+
+log() { echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
+
+get_slack_token() {
+  python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('/root/.openclaw/openclaw.json'))
+    print(cfg['channels']['slack']['accounts']['default']['botToken'])
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+get_owner_id() {
+  python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('/root/.openclaw/openclaw.json'))
+    ids = cfg['channels']['slack'].get('allowFrom', [])
+    # First U-prefixed entry is the human owner (not a bot U0A... pattern shared with bots)
+    for uid in ids:
+        if uid.startswith('U'):
+            print(uid)
+            sys.exit(0)
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null
+}
+
+slack_dm() {
+  local msg="$1"
+  local token owner payload resp ok
+  token=$(get_slack_token) || { log "ERROR: cannot read Slack token"; return 1; }
+  owner=$(get_owner_id)    || { log "ERROR: cannot determine owner Slack ID"; return 1; }
+  payload=$(python3 -c "import json,sys; print(json.dumps({'channel':sys.argv[1],'text':sys.argv[2]}))" \
+    "$owner" "$msg")
+  resp=$(curl -sf -X POST https://slack.com/api/chat.postMessage \
+    -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" \
+    -d "$payload" 2>/dev/null) || { log "ERROR: curl failed"; return 1; }
+  ok=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('ok',False))" <<< "$resp" 2>/dev/null || echo False)
+  [ "$ok" = "True" ] && log "Slack DM sent" || log "ERROR: Slack DM failed: $resp"
+}
+
+check_gateway() {
+  systemctl is-active --quiet openclaw-gateway || return 1
+  timeout 3 bash -c "</dev/tcp/127.0.0.1/${GATEWAY_PORT}" 2>/dev/null || return 1
+}
+
+probed_check() {
+  local delays=(0 60 120)
+  for i in 0 1 2; do
+    [ "${delays[$i]}" -gt 0 ] && { log "Waiting ${delays[$i]}s before retry..."; sleep "${delays[$i]}"; }
+    if check_gateway; then
+      log "Attempt $((i+1))/3: healthy"
+      return 0
+    fi
+    log "Attempt $((i+1))/3: failed (service=$(systemctl is-active openclaw-gateway 2>/dev/null || echo unknown))"
+  done
+  return 1
+}
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || { log "Another check running — skipping"; exit 0; }
+
+mkdir -p "$STATE_DIR"
+
+if probed_check; then
+  if [ -f "$ALERT_SENT_FILE" ]; then
+    log "Service recovered — notifying"
+    slack_dm "✅ OpenClaw gateway recovered ($(date -u +%FT%TZ))."
+    rm -f "$ALERT_SENT_FILE"
+  fi
+  exit 0
+fi
+
+# All 3 attempts failed
+now=$(date +%s)
+if [ -f "$ALERT_SENT_FILE" ]; then
+  last=$(stat -c %Y "$ALERT_SENT_FILE" 2>/dev/null || echo 0)
+  elapsed=$((now - last))
+  if [ "$elapsed" -lt "$ALERT_REPEAT_SECS" ]; then
+    log "Still down — alert suppressed (last sent ${elapsed}s ago, cooldown ${ALERT_REPEAT_SECS}s)"
+    exit 0
+  fi
+  log "Still down — re-alerting after ${elapsed}s"
+else
+  log "Confirmed down after 3 attempts — alerting"
+fi
+
+slack_dm "🔴 OpenClaw gateway DOWN ($(date -u +%FT%TZ)). All 3 checks failed. Run: journalctl -u openclaw-gateway -n 50"
+touch "$ALERT_SENT_FILE"
+HEARTBEAT
+chmod +x /usr/local/bin/openclaw-heartbeat-check
+
+cat > /etc/cron.d/openclaw-heartbeat <<'CRON'
+# Deterministic gateway health check — no LLM. Alerts via Slack API after 3 failed probes.
+*/10 * * * * root /usr/local/bin/openclaw-heartbeat-check
+CRON
+chmod 644 /etc/cron.d/openclaw-heartbeat
+
+echo "[bootstrap] Deterministic heartbeat check installed"
 
 # Weekly npm cache clean — prevents disk buildup between openclaw upgrades
 printf '# Weekly npm cache clean to prevent disk buildup between openclaw upgrades\n0 3 * * 0  root  npm cache clean --force\n' > /etc/cron.d/npm-cache-clean
