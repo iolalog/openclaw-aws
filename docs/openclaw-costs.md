@@ -1,0 +1,61 @@
+# OpenClaw LLM cost traps
+
+Two recurring patterns have caused unexpected Anthropic API credit burn on this instance. Both are documented here as a reference for future upgrades and new OpenClaw-written features.
+
+---
+
+## Pattern 1: OpenClaw uses LLM for tasks that don't need one
+
+When asked to implement a periodic task, OpenClaw consistently reaches for an LLM `agentTurn` even when a deterministic shell script is the correct tool. This has been observed multiple times and should be treated as a known default behaviour to push back on.
+
+**Canonical example — Hermes health check (May 2026):**
+The request was: "add a heartbeat to check the Hermes instance." A correct implementation reads a heartbeat JSON file via SSM and checks whether the gateway process is running — two shell commands. OpenClaw instead created a cron job with `"kind": "agentTurn"` that sent the full question to Sonnet 4.6 every 30 minutes. This burned ~$91 in 1.5 days before being caught.
+
+**What to check when OpenClaw proposes a new cron job or script:**
+- Is the payload type `agentTurn`? If the task is purely informational (read a file, check a process, compare a timestamp), it should be a shell script, not an agent turn.
+- Does any script call `openclaw` CLI, or make HTTP requests to an LLM API? If yes, question whether the LLM is actually needed.
+- Could a `systemEvent` (fires a message into the main session) be replaced with a plain Slack webhook call for notifications?
+
+**The fix pattern:** Replace `agentTurn` cron jobs with shell scripts that use the Slack API directly for alerts. See `infra/scripts/hermes-health-check.sh` and `openclaw-heartbeat-check` as reference implementations.
+
+---
+
+## Pattern 2: OpenClaw 2026.5.22 introduced default-on LLM features
+
+The upgrade from 2026.4.15 → 2026.5.22 (performed 2026-05-25) silently enabled two new features that make real inference calls without asking for consent or documenting an off-switch.
+
+### `agents.defaults.heartbeat` — DISABLED
+
+A built-in agent heartbeat that sends a full Sonnet turn every 30 minutes to check gateway liveness. Neither feature existed in 2026.4.15; both appeared immediately after the upgrade.
+
+**Cost at Sonnet 4.6 rates:** roughly $60/day if undetected. Combined with the Hermes health check above, the instance was burning ~$60/day until credits were exhausted.
+
+**Current state:** Disabled by the **absence** of `agents.defaults.heartbeat` in `~/.openclaw/openclaw.json`. OpenClaw hot-reloaded it out on 2026-05-26 19:13 UTC. There is no valid schema to explicitly set it to "disabled" — OpenClaw rejects both `{"enabled": false}` and `false` as invalid inputs. Absent = not running is the correct state.
+
+After every future upgrade, confirm the key is still absent:
+
+```bash
+# via SSM on the instance — should print "MISSING" if correctly absent
+python3 -c "import json; cfg=json.load(open('/root/.openclaw/openclaw.json')); print(cfg.get('agents',{}).get('defaults',{}).get('heartbeat','MISSING'))"
+```
+
+If an upgrade migration adds the key back, delete it from the config immediately and file a bug with OpenClaw.
+
+### `sidecars.model-prewarm` — NO CONFIG KNOB
+
+A gateway sidecar that makes a small inference call to the default model every 30 minutes to keep the provider auth state warm. Confirmed introduced in 2026.5.22 (zero occurrences in journal before upgrade, appears immediately after).
+
+**Cost:** Small per-call (a minimal prompt), but 48 calls/day. At Sonnet 4.6 rates this is roughly $0.50–$2/day depending on token count.
+
+**Purpose:** Avoids a cold-start delay on the first message after a long idle period. For a Slack bot with occasional traffic this benefit is marginal.
+
+**As of 2026.5.22 there is no config key to disable the prewarm.** The only mitigation is switching `agents.defaults.model.primary` to an OpenRouter-routed model (e.g. `openrouter/anthropic/claude-sonnet-4-6`) — this redirects the prewarm calls to OpenRouter instead of hitting the Anthropic API directly, but does not eliminate them. File a bug with the OpenClaw team requesting a `gateway.prewarm: false` config option.
+
+---
+
+## Monitoring recommendations
+
+- Watch the Anthropic usage dashboard after every upgrade. Any new per-30-minute entries are a red flag.
+- The `openclaw-heartbeat-check` script (runs every 10 min via `/etc/cron.d/openclaw-heartbeat`) is deterministic and does not use any LLM. It is safe.
+- The `hermes-health-check.sh` script (runs hourly via root crontab) is deterministic and does not use any LLM. It is safe.
+- The daily AI news brief (`91737c31` in OpenClaw cron) uses `anthropic/claude-haiku-4-5` explicitly and runs once daily. This is expected and intentional spend.

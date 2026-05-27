@@ -70,6 +70,23 @@ resource "aws_iam_role_policy" "openclaw_s3" {
 - **Re-check the recovery path** — run `/usr/local/bin/openclaw-save-known-good` after a successful Slack round-trip and verify `fail-count` resets to `0` and `openclaw.known-good.json` gets a fresh timestamp.
 - **Re-check Slack behavior** — confirm the gateway reconnects, typing indicators work, and replies land in the intended thread after restart.
 - **Treat log markers as unstable** — the `openclaw-save-known-good` gate is compatibility-tuned for current OpenClaw logs. Re-verify it after upgrades instead of assuming old journal markers still exist.
+- **After every upgrade, verify heartbeat is still disabled** — run `openclaw config get agents.defaults.heartbeat` and confirm `enabled` is `false`. OpenClaw may attempt to re-enable it during config migration. See cost traps below.
+
+## OpenClaw LLM cost traps
+
+See `docs/openclaw-costs.md` for full incident history. Two patterns have caused unexpected API credit burn:
+
+**1. OpenClaw writes LLM-based implementations when deterministic code would do.**
+When asked to implement any periodic task (health checks, monitoring, status reports), OpenClaw defaults to an LLM `agentTurn` even when a shell script is correct and far cheaper. Always read any script or cron job OpenClaw proposes before approving it. Red flags: `agentTurn` payload type in cron jobs, any script that calls `openclaw` CLI or hits an LLM API, any "intelligent" check that could be a simple file read or process check.
+
+**2. OpenClaw 2026.5.22 silently introduced two default-on LLM features:**
+
+| Feature | Cost | Status |
+|---|---|---|
+| `agents.defaults.heartbeat` — full Sonnet turn every 30 min | ~$60/day on Sonnet 4.6 | **Explicitly disabled** in config |
+| `sidecars.model-prewarm` — small inference call every 30 min | Low but nonzero | No config knob as of 2026.5.22 |
+
+The heartbeat is disabled by the **absence** of `agents.defaults.heartbeat` in `~/.openclaw/openclaw.json` — OpenClaw does not run it when the key is not present. There is no valid schema to explicitly set it to disabled; the only protection is ensuring the key is not present. The prewarm cannot be disabled without switching the default model away from Anthropic.
 
 ## Future S3 state migration
 
