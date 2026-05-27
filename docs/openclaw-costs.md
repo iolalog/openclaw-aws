@@ -43,15 +43,19 @@ python3 -c "import json; cfg=json.load(open('/root/.openclaw/openclaw.json')); p
 
 If an upgrade overwrites it, re-apply `{ "every": "0m" }` and file a bug with OpenClaw.
 
-### `sidecars.model-prewarm` — NO CONFIG KNOB
+### `sidecars.model-prewarm` — startup sidecar, probably not recurring
 
-A gateway sidecar that makes a small inference call to the default model every 30 minutes to keep the provider auth state warm. Confirmed introduced in 2026.5.22 (zero occurrences in journal before upgrade, appears immediately after).
+The `sidecars.model-prewarm` phase (~2.6s) appeared in liveness logs and was initially suspected to be a separate recurring 30-minute cost driver. Based on upstream GitHub issues this is more likely a **one-time gateway startup sidecar** — a synchronous model warmup that runs shortly after each restart, not on a recurring schedule.
 
-**Cost:** Small per-call (a minimal prompt), but 48 calls/day. At Sonnet 4.6 rates this is roughly $0.50–$2/day depending on token count.
+The liveness log entries that appeared ~30 minutes apart on May 25 are explained by the gateway restarting multiple times during the upgrade process that day; `recentPhases` reports what ran in the last liveness cycle, so a startup prewarm would show up in every post-restart liveness report.
 
-**Purpose:** Avoids a cold-start delay on the first message after a long idle period. For a Slack bot with occasional traffic this benefit is marginal.
+**Likely cost:** A one-off small inference call per gateway restart. Not a recurring cost driver.
 
-**As of 2026.5.22 there is no config key to disable the prewarm.** The only mitigation is switching `agents.defaults.model.primary` to an OpenRouter-routed model (e.g. `openrouter/anthropic/claude-sonnet-4-6`) — this redirects the prewarm calls to OpenRouter instead of hitting the Anthropic API directly, but does not eliminate them. File a bug with the OpenClaw team requesting a `gateway.prewarm: false` config option.
+**Validation:** After re-enabling the Anthropic API key, monitor with:
+```bash
+journalctl -u openclaw-gateway -f | grep -Ei 'heartbeat|prewarm|embedded run agent'
+```
+If `model-prewarm` only appears within a few minutes of restarts and 30-minute LLM calls have stopped, the heartbeat fix was the complete solution.
 
 ---
 

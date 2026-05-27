@@ -84,7 +84,7 @@ When asked to implement any periodic task (health checks, monitoring, status rep
 | Feature | Cost | Status |
 |---|---|---|
 | `agents.defaults.heartbeat` — full Sonnet turn every 30 min | ~$60/day on Sonnet 4.6 | **Explicitly disabled** in config |
-| `sidecars.model-prewarm` — small inference call every 30 min | Low but nonzero | No config knob as of 2026.5.22 |
+| `sidecars.model-prewarm` — startup sidecar, runs once per gateway restart | Small, one-off | Not a recurring cost driver (see `docs/openclaw-costs.md`) |
 
 The heartbeat is disabled via `agents.defaults.heartbeat.every: "0m"` in `~/.openclaw/openclaw.json` — this is the documented off-switch. Removing the key entirely does NOT disable it; OpenClaw falls back to the default 30-minute cadence. After every upgrade, verify the key is still present with `every: "0m"` and has not been overwritten by config migration.
 
