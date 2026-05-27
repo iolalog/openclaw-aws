@@ -30,16 +30,18 @@ A built-in agent heartbeat that sends a full Sonnet turn every 30 minutes to che
 
 **Cost at Sonnet 4.6 rates:** roughly $60/day if undetected. Combined with the Hermes health check above, the instance was burning ~$60/day until credits were exhausted.
 
-**Current state:** Disabled by the **absence** of `agents.defaults.heartbeat` in `~/.openclaw/openclaw.json`. OpenClaw hot-reloaded it out on 2026-05-26 19:13 UTC. There is no valid schema to explicitly set it to "disabled" — OpenClaw rejects both `{"enabled": false}` and `false` as invalid inputs. Absent = not running is the correct state.
+**Current state:** Disabled via `agents.defaults.heartbeat.every: "0m"` in `~/.openclaw/openclaw.json`, applied 2026-05-27.
 
-After every future upgrade, confirm the key is still absent:
+The correct off-switch is `{ "every": "0m" }`. Removing the key entirely does **not** disable it — OpenClaw falls back to the 30-minute default when the key is absent (this is what kept it running between 19:13 May 26 and the fix on May 27). `{ "enabled": false }` and a bare `false` are invalid schema and will be rejected on hot-reload.
+
+After every future upgrade, confirm the key survived config migration:
 
 ```bash
-# via SSM on the instance — should print "MISSING" if correctly absent
-python3 -c "import json; cfg=json.load(open('/root/.openclaw/openclaw.json')); print(cfg.get('agents',{}).get('defaults',{}).get('heartbeat','MISSING'))"
+# via SSM on the instance — should print {"every": "0m"}
+python3 -c "import json; cfg=json.load(open('/root/.openclaw/openclaw.json')); print(json.dumps(cfg.get('agents',{}).get('defaults',{}).get('heartbeat','MISSING')))"
 ```
 
-If an upgrade migration adds the key back, delete it from the config immediately and file a bug with OpenClaw.
+If an upgrade overwrites it, re-apply `{ "every": "0m" }` and file a bug with OpenClaw.
 
 ### `sidecars.model-prewarm` — NO CONFIG KNOB
 
