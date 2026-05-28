@@ -59,6 +59,28 @@ If `model-prewarm` only appears within a few minutes of restarts and 30-minute L
 
 ---
 
+---
+
+## Pattern 3: URL-free search fallback causes link hallucination
+
+**Observed:** 2026-05-28, Daily AI News Brief, session `da8480d9`.
+
+OpenClaw's default `web_search` provider is Kimi (via OpenRouter). Kimi does not support a `freshness` parameter. When the model passes `freshness: "day"`, Kimi returns `unsupported_freshness` and OpenClaw automatically falls back to Gemini. Gemini's native grounding returns narrative summaries with no per-article URLs.
+
+The model had genuine story content from those summaries but no links to attach to it. Rather than omitting stories it couldn't verify, Haiku fabricated plausible-looking URLs — correct Slack format, wrong destinations.
+
+**Fix applied to `ai-news-brief-update.sh`:**
+1. Explicit prompt instruction not to pass a `freshness` parameter (use date strings in query text instead)
+2. Mandatory URL verification gate: every story must be confirmed via `web_fetch` before inclusion; stories with unverified URLs must be dropped, not fabricated
+3. Count changed from exactly 10 to 5–10 verified stories — removes the structural pressure to invent links to hit a hard target
+
+**What to check if links are broken again:**
+- Session events: did searches route to `gemini` instead of `kimi`? If so, the freshness instruction is being ignored or a new model is reintroducing it
+- Did the model skip `web_fetch` calls? Count `web_fetch` tool calls in the session — should be at least as many as the number of stories in the brief
+- Check `tools.web.search.provider` (`openclaw config get tools.web.search.provider`) — if blank, the coding-profile default (Kimi) is in use; Brave or Perplexity would be more reliable alternatives and both support freshness filtering natively
+
+---
+
 ## Monitoring recommendations
 
 - Watch the Anthropic usage dashboard after every upgrade. Any new per-30-minute entries are a red flag.
