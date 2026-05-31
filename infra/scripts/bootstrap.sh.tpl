@@ -552,13 +552,13 @@ slack_dm() {
 
 check_gateway() {
   systemctl is-active --quiet openclaw-gateway || return 1
-  timeout 3 bash -c "</dev/tcp/127.0.0.1/${GATEWAY_PORT}" 2>/dev/null || return 1
+  timeout 3 bash -c "</dev/tcp/127.0.0.1/$${GATEWAY_PORT}" 2>/dev/null || return 1
 }
 
 probed_check() {
   local delays=(0 60 120)
   for i in 0 1 2; do
-    [ "${delays[$i]}" -gt 0 ] && { log "Waiting ${delays[$i]}s before retry..."; sleep "${delays[$i]}"; }
+    [ "$${delays[$i]}" -gt 0 ] && { log "Waiting $${delays[$i]}s before retry..."; sleep "$${delays[$i]}"; }
     if check_gateway; then
       log "Attempt $((i+1))/3: healthy"
       return 0
@@ -588,10 +588,10 @@ if [ -f "$ALERT_SENT_FILE" ]; then
   last=$(stat -c %Y "$ALERT_SENT_FILE" 2>/dev/null || echo 0)
   elapsed=$((now - last))
   if [ "$elapsed" -lt "$ALERT_REPEAT_SECS" ]; then
-    log "Still down — alert suppressed (last sent ${elapsed}s ago, cooldown ${ALERT_REPEAT_SECS}s)"
+    log "Still down — alert suppressed (last sent $${elapsed}s ago, cooldown $${ALERT_REPEAT_SECS}s)"
     exit 0
   fi
-  log "Still down — re-alerting after ${elapsed}s"
+  log "Still down — re-alerting after $${elapsed}s"
 else
   log "Confirmed down after 3 attempts — alerting"
 fi
