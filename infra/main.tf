@@ -9,6 +9,14 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+
+  default_tags {
+    tags = {
+      project    = "openclaw"
+      managed-by = "terraform"
+      repo       = "iolalog/openclaw-aws"
+    }
+  }
 }
 
 data "aws_caller_identity" "current" {}
