@@ -15,11 +15,14 @@ systemctl start  snap.amazon-ssm-agent.amazon-ssm-agent.service
 
 echo "[bootstrap] SSM agent installed and started"
 
-# ── 2. Install Node.js v22 via NodeSource ─────────────────────────────────────
+# ── 2. Install Node.js v24 via NodeSource ─────────────────────────────────────
+# OpenClaw 2.0+ (v2026.8.1+) requires Node >=24.16 <25 or >=26.1. On an older
+# Node, `npm install -g openclaw` silently resolves to the highest compatible
+# pre-2.0 release instead of erroring — it will NOT tell you it skipped 2.0.
 apt-get update -qq
 apt-get install -y -qq curl gnupg
 
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y -qq nodejs
 
 echo "[bootstrap] Node.js $(node --version) installed"
@@ -114,14 +117,38 @@ openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
 openclaw config set agents.defaults.model "anthropic/claude-sonnet-4-6"
 # Enable memory search with Google embeddings (text-embedding-004).
-openclaw config set agents.defaults.memorySearch.enabled true
-openclaw config set agents.defaults.memorySearch.provider gemini
+# As of OpenClaw 2.0 (v2026.8.1) this key moved from agents.defaults.memorySearch
+# to memory.search — `openclaw doctor --fix` migrates it automatically on upgrade,
+# but a fresh install must use the current path directly.
+openclaw config set memory.search.enabled true
+openclaw config set memory.search.provider gemini
 
 # ── Heartbeat: OpenClaw LLM heartbeat is deliberately disabled ────────────────
 # Health monitoring is handled by the deterministic openclaw-heartbeat-check.sh
 # script (installed below) which uses Slack API directly — no LLM involved.
 # Never re-enable the LLM heartbeat: it sends 168K tokens every 30 minutes
 # regardless of lightContext, costing ~$48/day with no diagnostic value.
+
+# ── OpenClaw 2.0 default-on background LLM features: disabled ────────────────
+# v2026.8.1 ("OpenClaw 2.0") introduced two features that make background model
+# calls with no opt-in prompt. Same failure class as the heartbeat above — see
+# docs/openclaw-costs.md. Disabled until deliberately evaluated and re-enabled.
+#
+# "Grounded Dreaming" — memory-core plugin creates a daily 3am cron job
+# (declaration: memory-core:memory-dreaming-promotion) that runs a model-backed
+# memory consolidation pass. Off by default upstream would be nice; it isn't.
+openclaw config set plugins.entries.memory-core.config.dreaming.enabled false
+#
+# Skill Workshop autonomous self-learning — creates a weekly cron job
+# (declaration: skill-collection-review:<agent>) that runs a full `agentTurn`
+# with exec/write/edit tool access against the workspace skills directory,
+# fully unsupervised (approvalPolicy defaults to "auto" — no human review step).
+# This is exactly the "agentTurn cron job" red flag this repo already watches
+# for, except OpenClaw creates it itself rather than something we asked it to
+# write. `openclaw automations disable` refuses to touch it (system-owned) —
+# it must be turned off via this config, not the cron/automations CLI.
+openclaw config set skills.workshop.autonomous.mode off
+openclaw config set skills.workshop.approvalPolicy pending
 
 # ── Model allowlist ───────────────────────────────────────────────────────────
 # Set agents.defaults.models to restrict which models can be used and provide
@@ -400,6 +427,17 @@ echo "[bootstrap] Recovery scripts installed"
 cat > /usr/local/bin/openclaw-upgrade <<'UPGRADE'
 #!/bin/bash
 set -uo pipefail
+export HOME=/root
+# Our systemd unit is hand-authored, not created by OpenClaw's own installer, so
+# doctor's service-ownership check can't classify it as "owned" or "absent" and
+# refuses to run maintenance ("Gateway service ownership or shutdown could not
+# be verified"). This is the documented escape hatch for externally-managed
+# services — found in dist/doctor-service-repair-policy-*.mjs. Without it,
+# any upgrade that needs a `doctor --fix` state/config migration (which most
+# OpenClaw 2.x releases do) will crash-loop the gateway until the prestart
+# fail-safe reverts to the pre-upgrade known-good config, silently undoing
+# the upgrade.
+export OPENCLAW_SERVICE_REPAIR_POLICY=external
 
 trap 'echo "[openclaw-upgrade] ERROR — restarting service with existing install"; systemctl start openclaw-gateway.service || true' ERR
 
@@ -414,6 +452,8 @@ openclaw plugins install @openclaw/slack
 echo "[openclaw-upgrade] cleaning npm cache..."
 npm cache clean --force
 echo "[openclaw-upgrade] version: $(openclaw --version 2>&1 | head -1)"
+echo "[openclaw-upgrade] running doctor --fix for state/config migrations..."
+openclaw doctor --fix --force --non-interactive --yes || echo "[openclaw-upgrade] WARNING: doctor --fix reported an error — check manually before the gateway restarts"
 echo "[openclaw-upgrade] starting service..."
 systemctl start openclaw-gateway.service
 echo "[openclaw-upgrade] done."
@@ -463,6 +503,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/root/.openclaw/workspace
 Environment=HOME=/root
+Environment=OPENCLAW_SERVICE_REPAIR_POLICY=external
 ExecStartPre=/usr/local/bin/openclaw-prestart
 ExecStart=/usr/bin/node --max-old-space-size=1500 /usr/bin/openclaw gateway run
 Restart=always
