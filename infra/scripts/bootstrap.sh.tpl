@@ -20,7 +20,7 @@ echo "[bootstrap] SSM agent installed and started"
 # Node, `npm install -g openclaw` silently resolves to the highest compatible
 # pre-2.0 release instead of erroring — it will NOT tell you it skipped 2.0.
 apt-get update -qq
-apt-get install -y -qq curl gnupg jq
+apt-get install -y -qq curl gnupg jq gitleaks
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y -qq nodejs
@@ -167,6 +167,22 @@ exec /usr/local/bin/aws ssm get-parameter --region ${aws_region} --name "/opencl
 SECRETHELPER
 chown root:root /usr/local/bin/openclaw-ssm-secrets /usr/local/bin/openclaw-secret
 chmod 755 /usr/local/bin/openclaw-ssm-secrets /usr/local/bin/openclaw-secret
+
+# Owner DM helper for scripts (memory-backup alerts etc.); token via openclaw-secret.
+cat > /usr/local/bin/openclaw-slack-dm <<'SLACKDM'
+#!/bin/bash
+# Send a Slack DM to the owner: openclaw-slack-dm "message"
+# Bot token from SSM (openclaw-secret); owner = first U-prefixed id in channels.slack.allowFrom.
+set -euo pipefail
+msg="$${1:?usage: openclaw-slack-dm <message>}"
+token=$(/usr/local/bin/openclaw-secret slack-bot-token)
+owner=$(jq -r '[.channels.slack.allowFrom[]? | select(startswith("U"))][0] // empty' /root/.openclaw/openclaw.json)
+[ -n "$owner" ] || { echo "openclaw-slack-dm: no owner id in channels.slack.allowFrom" >&2; exit 1; }
+payload=$(jq -n --arg c "$owner" --arg t "$msg" '{channel: $c, text: $t}')
+resp=$(curl -sf -X POST https://slack.com/api/chat.postMessage -H "Authorization: Bearer $token" -H "Content-Type: application/json; charset=utf-8" -d "$payload")
+[ "$(jq -r .ok <<<"$resp")" = true ] || { echo "openclaw-slack-dm: Slack error: $(jq -r .error <<<"$resp")" >&2; exit 1; }
+SLACKDM
+chmod 755 /usr/local/bin/openclaw-slack-dm
 
 openclaw config set --batch-json '[
  {"path":"secrets.providers.awsssm","value":{"source":"exec","command":"/usr/local/bin/openclaw-ssm-secrets","jsonOnly":true,"timeoutMs":20000,"noOutputTimeoutMs":20000,"passEnv":["PATH","HOME"],"trustedDirs":["/usr/local/bin"]}},
@@ -598,6 +614,39 @@ ASYNC
 chmod +x /usr/local/bin/openclaw-upgrade-async
 
 echo "[bootstrap] Upgrade wrapper installed"
+
+# ── 5c. gitleaks pre-commit hook for every repo root commits to ──────────────
+# The memory repo is committed and pushed unattended every night
+# (memory-backup.sh); until 2026-11 that leaked Slack and gateway tokens into
+# its history. A global hooks path (like the dev machine's) covers re-clones
+# too. The agent can bypass it with --no-verify: guard rail, not enforcement.
+mkdir -p /usr/local/lib/openclaw-git-hooks
+cat > /usr/local/lib/openclaw-git-hooks/dispatch <<'GITHOOK'
+#!/bin/bash
+# Global git hooks for root on the OpenClaw instance (core.hooksPath points here).
+# Every hook name is a symlink to this file. pre-commit scans staged changes with
+# gitleaks; then every hook runs the repo's own .git/hooks/<name>, which a global
+# core.hooksPath would otherwise skip.
+set -euo pipefail
+hook="$(basename "$0")"
+if [ "$hook" = pre-commit ]; then
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks not installed (apt-get install gitleaks); commit blocked." >&2
+    exit 1
+  fi
+  if ! gitleaks protect --staged --redact --no-banner; then
+    echo "pre-commit: gitleaks found a possible secret in the staged changes; commit blocked." >&2
+    exit 1
+  fi
+fi
+repo_hook="$(git rev-parse --git-common-dir)/hooks/$hook"
+if [ -x "$repo_hook" ]; then
+  exec "$repo_hook" "$@"
+fi
+GITHOOK
+chmod 755 /usr/local/lib/openclaw-git-hooks/dispatch
+for h in pre-commit commit-msg prepare-commit-msg post-commit pre-push post-checkout post-merge pre-rebase post-rewrite; do ln -sf dispatch /usr/local/lib/openclaw-git-hooks/$h; done
+HOME=/root git config --global core.hooksPath /usr/local/lib/openclaw-git-hooks
 
 # ── 6. Clone openclaw-memory repo ────────────────────────────────────────────
 mkdir -p /root/.openclaw
