@@ -45,4 +45,18 @@ Suggested approach: authenticate once via Tink or Aiia OAuth, store the token se
 
 ## IAM expansion pattern
 
-Before enabling any new capability that requires AWS access, add a scoped policy following the pattern in `infra/iam.tf`. See `CLAUDE.md` for the template. Keep permissions minimal and expand deliberately per skill.
+Before enabling any new capability that requires AWS access, add a scoped policy in `infra/iam.tf`. Keep permissions minimal and expand deliberately per skill. Template:
+
+```hcl
+resource "aws_iam_role_policy" "openclaw_s3" {
+  name = "openclaw-s3"
+  role = aws_iam_role.openclaw.id
+  policy = jsonencode({
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:GetObject", "s3:PutObject"]
+      Resource = "arn:aws:s3:::YOUR-BUCKET/*"
+    }]
+  })
+}
+```

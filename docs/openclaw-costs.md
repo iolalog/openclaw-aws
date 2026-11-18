@@ -59,6 +59,17 @@ If `model-prewarm` only appears within a few minutes of restarts and 30-minute L
 
 ---
 
+## Pattern 2b: OpenClaw 2.0 (v2026.8.1) added more default-on LLM features
+
+Both arrived default-on with OpenClaw 2.0 ("the largest update"), auto-creating their cron jobs on first start after upgrade with no opt-in prompt — same pattern as the heartbeat incident, at lower frequency.
+
+| Feature | Cost | Status |
+|---|---|---|
+| `plugins.entries.memory-core.config.dreaming` — "Grounded Dreaming", daily 3am model-backed memory consolidation cron job (`memory-core:memory-dreaming-promotion`) | Unmeasured, 1x/day | **Disabled** in config (2026-09-12) |
+| `skills.workshop.autonomous.mode` — weekly `agentTurn` cron job (`skill-collection-review:<agent>`) with `exec`/`write`/`edit` tool access against the workspace, unsupervised (`approvalPolicy` defaults to `"auto"`) | Unmeasured, 1x/week; unattended write/exec is also a safety concern | **Disabled** in config (2026-09-12): `autonomous.mode=off`, `approvalPolicy=pending` |
+
+`openclaw automations disable` refuses to touch either job (`system-owned monitor jobs cannot be edited by cron clients`); they must be turned off via `openclaw config set`, which is why bootstrap sets them at install time (see `infra/scripts/bootstrap.sh.tpl`). After any major-version upgrade, re-check both keys survived migration, the same way the heartbeat key is re-checked.
+
 ---
 
 ## Pattern 3: URL-free search fallback causes link hallucination
