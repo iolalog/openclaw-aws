@@ -173,6 +173,9 @@ openclaw config set --batch-json '[
  {"path":"channels.slack.accounts.default.botToken","value":{"source":"exec","provider":"awsssm","id":"slack-bot-token"}},
  {"path":"channels.slack.accounts.default.appToken","value":{"source":"exec","provider":"awsssm","id":"slack-app-token"}}
 ]'
+# Anthropic key for OpenClaw itself: same SSM-backed SecretRef, so it is never
+# stored as a plaintext auth profile in state/openclaw.sqlite.
+openclaw config set models.providers.anthropic.apiKey --ref-provider awsssm --ref-source exec --ref-id anthropic-api-key
 openclaw config set channels.slack.mode socket
 # groupPolicy starts open so the first DM from the owner triggers the pairing prompt.
 # openclaw pairing approve slack <CODE> writes the owner's user ID to:

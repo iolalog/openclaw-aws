@@ -39,8 +39,9 @@ All secrets live in SSM Parameter Store under `/openclaw/*` (SecureString). Noth
 
 - **Slack bot + app tokens:** exec SecretRefs in `openclaw.json` (`{"source":"exec","provider":"awsssm","id":"slack-bot-token"}`). Provider `secrets.providers.awsssm` runs `/usr/local/bin/openclaw-ssm-secrets`, which maps id `x` to `/openclaw/x` using the instance role.
 - **Scripts and cron jobs** get a secret with `/usr/local/bin/openclaw-secret <name>` (e.g. `slack-bot-token`), never by parsing `openclaw.json`.
-- **OpenRouter / Gemini / Anthropic API keys:** written to `/etc/openclaw/env` (root, 0600) at bootstrap and loaded by the systemd unit.
-- **Not yet moved:** `gateway.auth.token` (loopback-only gateway; redacted in backups) and the Anthropic auth-profile key OpenClaw keeps in `state/openclaw.sqlite` (`openclaw secrets audit --check` lists both).
+- **Anthropic API key (OpenClaw's own model calls):** exec SecretRef at `models.providers.anthropic.apiKey` → `/openclaw/anthropic-api-key`. Since 2026-11-18 there is no stored `anthropic:default` auth profile; `openclaw models status` shows `effective=… secretref-managed`. Don't use `openclaw models auth login`/`paste-api-key` for Anthropic — it stores the key in plaintext again.
+- **OpenRouter / Gemini / Anthropic keys for scripts:** also written to `/etc/openclaw/env` (root, 0600) at bootstrap and loaded by the systemd unit.
+- **Not moved:** `gateway.auth.token` (loopback-only gateway; redacted in backups). `openclaw secrets audit --check --allow-exec` should report only this one plaintext finding.
 
 Rotate a Slack token (from a dev machine, then on the instance):
 
