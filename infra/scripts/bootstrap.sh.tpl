@@ -116,12 +116,17 @@ openclaw config set channels.slack.replyToModeByChatType.channel all
 openclaw config set gateway.mode local
 # Model must be a flat string; "primary"/"fallback" sub-keys are not valid here.
 openclaw config set agents.defaults.model "anthropic/claude-sonnet-4-6"
-# Enable memory search with Google embeddings (text-embedding-004).
+# Enable memory search, keyword-only (SQLite FTS, no embeddings API).
+# Switched from Gemini embeddings on 2026-11-18 after the Gemini credits ran out:
+# with an explicit provider and no working key, memory indexing stops entirely.
+# Keyword recall is adequate for this memory size (~170 files, <1 MB). To go
+# back to semantic search, set provider to gemini (or another embeddings
+# provider with a funded key), then — with the gateway stopped — run:
+#   openclaw memory index --force --agent main
 # As of OpenClaw 2.0 (v2026.8.1) this key moved from agents.defaults.memorySearch
-# to memory.search — `openclaw doctor --fix` migrates it automatically on upgrade,
-# but a fresh install must use the current path directly.
+# to memory.search — a fresh install must use the current path directly.
 openclaw config set memory.search.enabled true
-openclaw config set memory.search.provider gemini
+openclaw config set memory.search.provider none
 
 # ── Heartbeat: OpenClaw LLM heartbeat is deliberately disabled ────────────────
 # Health monitoring is handled by the deterministic openclaw-heartbeat-check.sh
@@ -458,6 +463,7 @@ rm -rf /usr/lib/node_modules/.openclaw-*
 log "installing latest openclaw..."
 if ! npm install -g openclaw; then
   log "ERROR: npm install failed — restarting service with existing install"
+  systemctl reset-failed openclaw-gateway.service || true
   systemctl start openclaw-gateway.service
   exit 1
 fi
@@ -485,6 +491,8 @@ openclaw plugins update slack || log "WARNING: slack plugin update failed — ch
 log "cleaning npm cache..."
 npm cache clean --force
 log "starting service..."
+# Clears a previous start-limit-hit state (see StartLimit* in the unit).
+systemctl reset-failed openclaw-gateway.service || true
 if ! systemctl start openclaw-gateway.service; then
   log "ERROR: gateway failed to start — check: journalctl -u openclaw-gateway -n 80"
   exit 1
@@ -531,6 +539,13 @@ cat > /etc/systemd/system/openclaw-gateway.service <<SERVICE
 Description=OpenClaw Gateway
 After=network-online.target
 Wants=network-online.target
+# Give up after 10 starts in 10 min instead of crash-looping forever
+# (2026-11-18: 699 restarts in 4 h on an invalid config). With RestartSec=10
+# that is ~3-4 min, including two known-good restores by openclaw-prestart.
+# openclaw-heartbeat-check keeps alerting while it is down. To start again:
+#   systemctl reset-failed openclaw-gateway && systemctl start openclaw-gateway
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 [Service]
 Type=simple
