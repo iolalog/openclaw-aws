@@ -33,6 +33,25 @@ What happened on 2026-11-18 (2026.10.3 → 2026.11.5): the release retired `agen
 5. **Treat log markers as unstable** — the `openclaw-save-known-good` gate is compatibility-tuned for current OpenClaw logs. Re-verify it after upgrades instead of assuming old journal markers still exist.
 6. **Verify the default-on LLM features are still off** — `openclaw health` shows `Heartbeat interval: disabled`, dreaming disabled, skills workshop `autonomous.mode=off`. See [`openclaw-costs.md`](openclaw-costs.md).
 
+## Secrets
+
+All secrets live in SSM Parameter Store under `/openclaw/*` (SecureString). Nothing secret may be in `openclaw.json`: the file is copied to `openclaw.known-good.json` and, redacted, into the memory repo by the nightly `memory-backup.sh`. Until 2026-11-18 the Slack tokens were in it and reached the memory repo's git history (private repo), so both were rotated (see below).
+
+- **Slack bot + app tokens:** exec SecretRefs in `openclaw.json` (`{"source":"exec","provider":"awsssm","id":"slack-bot-token"}`). Provider `secrets.providers.awsssm` runs `/usr/local/bin/openclaw-ssm-secrets`, which maps id `x` to `/openclaw/x` using the instance role.
+- **Scripts and cron jobs** get a secret with `/usr/local/bin/openclaw-secret <name>` (e.g. `slack-bot-token`), never by parsing `openclaw.json`.
+- **OpenRouter / Gemini / Anthropic API keys:** written to `/etc/openclaw/env` (root, 0600) at bootstrap and loaded by the systemd unit.
+- **Not yet moved:** `gateway.auth.token` (loopback-only gateway; redacted in backups) and the Anthropic auth-profile key OpenClaw keeps in `state/openclaw.sqlite` (`openclaw secrets audit --check` lists both).
+
+Rotate a Slack token (from a dev machine, then on the instance):
+
+```bash
+aws ssm put-parameter --region eu-north-1 --name /openclaw/slack-bot-token --type SecureString --overwrite --value "$NEW_TOKEN"
+# on the instance (HOME=/root):
+openclaw secrets reload && journalctl -u openclaw-gateway -n 30 | grep -i slack
+```
+
+If `secrets reload` doesn't reconnect Slack, `systemctl restart openclaw-gateway`. The agent runs as root with an instance role that can read `/openclaw/*`, so this keeps secrets out of files and git, not out of the agent's reach.
+
 ## Cron files
 
 - **`/etc/cron.d/` commands must be single-line** — Vixie cron (Ubuntu) does not reliably support `\` line continuation in `/etc/cron.d/` files. The watchdog was silently broken for weeks because of this. Always write one complete command per line.

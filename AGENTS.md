@@ -26,7 +26,8 @@ Runs: local only, because Terraform state is local and gitignored (`infra/terraf
 Security — do not relax without explicit instruction:
 - Security group `openclaw-sg` has zero ingress rules; port 22 never appears.
 - SSM Session Manager is the only terminal access path. IMDSv2 required (`http_tokens = "required"`).
-- No secrets in committed files. All secrets come from Parameter Store `/openclaw/*` at boot; `infra/terraform.tfvars` is gitignored (shape in `.example`).
+- No secrets in committed files. All secrets come from Parameter Store `/openclaw/*`; `infra/terraform.tfvars` is gitignored (shape in `.example`).
+- No secrets in `openclaw.json` either (it is backed up to the memory repo). Slack tokens are exec SecretRefs; scripts use `openclaw-secret <name>`. See `docs/openclaw-operations.md#secrets`.
 - Instance role is Cost Explorer read + Parameter Store read on `/openclaw/*`. Expand only per skill, deliberately — template in `docs/use-cases.md`.
 
 Repo:

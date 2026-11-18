@@ -94,8 +94,85 @@ for v in SLACK_BOT_TOKEN SLACK_APP_TOKEN OPENROUTER_API_KEY GEMINI_API_KEY ANTHR
   [ -z "$${!v}" ] && echo "[bootstrap] WARNING: could not fetch SSM param for $v"
 done
 
-openclaw config set channels.slack.accounts.default.botToken "$SLACK_BOT_TOKEN"
-openclaw config set channels.slack.accounts.default.appToken "$SLACK_APP_TOKEN"
+# ── Slack tokens: SecretRefs resolved from Parameter Store, never in openclaw.json ─
+# openclaw.json is copied around (known-good, workspace backups committed to the
+# memory repo), so it must not hold credentials. The gateway resolves the Slack
+# tokens at startup and on `openclaw secrets reload` through an exec SecretRef
+# provider that reads /openclaw/<id> from SSM. Scripts use openclaw-secret.
+# Rotation: put-parameter --overwrite, then `openclaw secrets reload` (see
+# docs/openclaw-operations.md).
+unset SLACK_BOT_TOKEN SLACK_APP_TOKEN  # fetched above only to check they exist
+
+cat > /usr/local/bin/openclaw-ssm-secrets <<'RESOLVER'
+#!/usr/bin/python3
+"""OpenClaw exec SecretRef resolver backed by SSM Parameter Store.
+
+Protocol v1: reads {"protocolVersion":1,"provider":...,"ids":[...]} on stdin and
+prints {"protocolVersion":1,"values":{id: value},"errors":{id:{"code":...}}}.
+A ref id "slack-bot-token" maps to the parameter /openclaw/slack-bot-token.
+Credentials come from the EC2 instance role (IMDS); nothing is cached on disk.
+"""
+import json
+import re
+import subprocess
+import sys
+
+PREFIX = "/openclaw/"
+REGION = "${aws_region}"
+AWS = "/usr/local/bin/aws"
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+
+
+def main():
+    req = json.load(sys.stdin)
+    ids = [i for i in req.get("ids", []) if isinstance(i, str)]
+    values, errors = {}, {}
+    valid = [i for i in ids if ID_RE.match(i)]
+    for i in ids:
+        if i not in valid:
+            errors[i] = {"code": "INVALID_ID"}
+    if valid:
+        try:
+            out = subprocess.run(
+                [AWS, "ssm", "get-parameters", "--region", REGION, "--with-decryption", "--output", "json", "--names", *[PREFIX + i for i in valid]],
+                capture_output=True, text=True, timeout=20, check=True,
+            )
+            found = {p["Name"]: p["Value"] for p in json.loads(out.stdout).get("Parameters", [])}
+        except Exception:
+            found = None
+        for i in valid:
+            if found is None:
+                errors[i] = {"code": "RESOLVER_ERROR"}
+            elif found.get(PREFIX + i):
+                values[i] = found[PREFIX + i]
+            else:
+                errors[i] = {"code": "NOT_FOUND"}
+    resp = {"protocolVersion": 1, "values": values}
+    if errors:
+        resp["errors"] = errors
+    json.dump(resp, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()
+RESOLVER
+
+cat > /usr/local/bin/openclaw-secret <<'SECRETHELPER'
+#!/bin/bash
+# Print one secret from SSM Parameter Store: openclaw-secret slack-bot-token
+# Maps to /openclaw/<name>; uses the EC2 instance role. For scripts and cron jobs.
+set -euo pipefail
+[[ "$${1:-}" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || { echo "usage: openclaw-secret <name>" >&2; exit 2; }
+exec /usr/local/bin/aws ssm get-parameter --region ${aws_region} --name "/openclaw/$1" --with-decryption --query Parameter.Value --output text
+SECRETHELPER
+chown root:root /usr/local/bin/openclaw-ssm-secrets /usr/local/bin/openclaw-secret
+chmod 755 /usr/local/bin/openclaw-ssm-secrets /usr/local/bin/openclaw-secret
+
+openclaw config set --batch-json '[
+ {"path":"secrets.providers.awsssm","value":{"source":"exec","command":"/usr/local/bin/openclaw-ssm-secrets","jsonOnly":true,"timeoutMs":20000,"noOutputTimeoutMs":20000,"passEnv":["PATH","HOME"],"trustedDirs":["/usr/local/bin"]}},
+ {"path":"channels.slack.accounts.default.botToken","value":{"source":"exec","provider":"awsssm","id":"slack-bot-token"}},
+ {"path":"channels.slack.accounts.default.appToken","value":{"source":"exec","provider":"awsssm","id":"slack-app-token"}}
+]'
 openclaw config set channels.slack.mode socket
 # groupPolicy starts open so the first DM from the owner triggers the pairing prompt.
 # openclaw pairing approve slack <CODE> writes the owner's user ID to:
@@ -618,14 +695,7 @@ ALERT_REPEAT_SECS=3600
 log() { echo "[$(date -u +%FT%TZ)] $*" >> "$LOG"; }
 
 get_slack_token() {
-  python3 -c "
-import json, sys
-try:
-    cfg = json.load(open('/root/.openclaw/openclaw.json'))
-    print(cfg['channels']['slack']['accounts']['default']['botToken'])
-except Exception:
-    sys.exit(1)
-" 2>/dev/null
+  /usr/local/bin/openclaw-secret slack-bot-token 2>/dev/null
 }
 
 get_owner_id() {
