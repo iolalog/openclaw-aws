@@ -20,7 +20,7 @@ echo "[bootstrap] SSM agent installed and started"
 # Node, `npm install -g openclaw` silently resolves to the highest compatible
 # pre-2.0 release instead of erroring — it will NOT tell you it skipped 2.0.
 apt-get update -qq
-apt-get install -y -qq curl gnupg
+apt-get install -y -qq curl gnupg jq
 
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
 apt-get install -y -qq nodejs
@@ -128,6 +128,10 @@ openclaw config set memory.search.provider gemini
 # script (installed below) which uses Slack API directly — no LLM involved.
 # Never re-enable the LLM heartbeat: it sends 168K tokens every 30 minutes
 # regardless of lightContext, costing ~$48/day with no diagnostic value.
+# Since 2026.11.x the heartbeat is an ordinary automation (heartbeat-main), not
+# a config key — `agents.defaults.heartbeat` is retired and makes the config
+# invalid. It is disabled after the gateway starts (section 7), because
+# `openclaw system heartbeat disable` needs a running gateway.
 
 # ── OpenClaw 2.0 default-on background LLM features: disabled ────────────────
 # v2026.8.1 ("OpenClaw 2.0") introduced two features that make background model
@@ -142,13 +146,13 @@ openclaw config set plugins.entries.memory-core.config.dreaming.enabled false
 # Skill Workshop autonomous self-learning — creates a weekly cron job
 # (declaration: skill-collection-review:<agent>) that runs a full `agentTurn`
 # with exec/write/edit tool access against the workspace skills directory,
-# fully unsupervised (approvalPolicy defaults to "auto" — no human review step).
+# fully unsupervised, with no human review step.
 # This is exactly the "agentTurn cron job" red flag this repo already watches
 # for, except OpenClaw creates it itself rather than something we asked it to
 # write. `openclaw automations disable` refuses to touch it (system-owned) —
 # it must be turned off via this config, not the cron/automations CLI.
+# (skills.workshop.approvalPolicy was removed in 2026.11.x and is now invalid.)
 openclaw config set skills.workshop.autonomous.mode off
-openclaw config set skills.workshop.approvalPolicy pending
 
 # ── Model allowlist ───────────────────────────────────────────────────────────
 # Set agents.defaults.models to restrict which models can be used and provide
@@ -420,10 +424,17 @@ chmod +x /usr/local/bin/openclaw-save-known-good
 
 echo "[bootstrap] Recovery scripts installed"
 
-# Upgrade wrapper: stops the service, installs latest openclaw, cleans npm cache, restarts.
+# Upgrade wrapper: stop → install → doctor --fix → validate → update plugins → start.
 # OpenClaw must always use this instead of running npm install -g directly — upgrading
 # in-flight corrupts the package because node holds the module files open while npm
 # tries to replace them.
+#
+# Order matters: a new release can reject old config keys, and every other
+# openclaw command (including plugin updates) refuses to run on an invalid
+# config. So doctor --fix runs straight after the install, with the service
+# stopped. If the config is still invalid afterwards, the service is left
+# STOPPED — starting it would only crash-loop (2026-11-18: 699 restarts in 4h).
+# openclaw-heartbeat-check DMs the owner while it is down.
 cat > /usr/local/bin/openclaw-upgrade <<'UPGRADE'
 #!/bin/bash
 set -uo pipefail
@@ -432,31 +443,53 @@ export HOME=/root
 # doctor's service-ownership check can't classify it as "owned" or "absent" and
 # refuses to run maintenance ("Gateway service ownership or shutdown could not
 # be verified"). This is the documented escape hatch for externally-managed
-# services — found in dist/doctor-service-repair-policy-*.mjs. Without it,
-# any upgrade that needs a `doctor --fix` state/config migration (which most
-# OpenClaw 2.x releases do) will crash-loop the gateway until the prestart
-# fail-safe reverts to the pre-upgrade known-good config, silently undoing
-# the upgrade.
+# services — found in dist/doctor-service-repair-policy-*.mjs.
 export OPENCLAW_SERVICE_REPAIR_POLICY=external
 
-trap 'echo "[openclaw-upgrade] ERROR — restarting service with existing install"; systemctl start openclaw-gateway.service || true' ERR
+log() { echo "[openclaw-upgrade] $*"; }
 
-echo "[openclaw-upgrade] stopping service..."
-systemctl stop openclaw-gateway.service
-echo "[openclaw-upgrade] cleaning stale npm temp dirs..."
+log "stopping service..."
+if ! systemctl stop openclaw-gateway.service || systemctl is-active --quiet openclaw-gateway.service; then
+  log "ERROR: could not stop the gateway — aborting before touching the install"
+  exit 1
+fi
+log "cleaning stale npm temp dirs..."
 rm -rf /usr/lib/node_modules/.openclaw-*
-echo "[openclaw-upgrade] installing latest openclaw..."
-npm install -g openclaw
-echo "[openclaw-upgrade] reinstalling plugins..."
-openclaw plugins install @openclaw/slack
-echo "[openclaw-upgrade] cleaning npm cache..."
+log "installing latest openclaw..."
+if ! npm install -g openclaw; then
+  log "ERROR: npm install failed — restarting service with existing install"
+  systemctl start openclaw-gateway.service
+  exit 1
+fi
+log "version: $(openclaw --version 2>&1 | head -1)"
+
+# Reset the prestart fail-safe counter so a slow first start can't trigger a
+# revert to the pre-upgrade known-good config mid-migration.
+echo 0 > /var/lib/openclaw/fail-count
+
+# Plain `doctor --fix` with no TTY, not `--non-interactive --yes`: the
+# non-interactive mode deliberately leaves retired keys such as
+# agents.defaults.heartbeat in place, which keeps the config invalid.
+log "running doctor --fix for state/config migrations..."
+openclaw doctor --fix </dev/null || log "WARNING: doctor --fix exited non-zero"
+
+log "validating config..."
+if ! openclaw config validate; then
+  log "ERROR: config still invalid after doctor --fix — leaving service STOPPED."
+  log "Fix manually (see docs/openclaw-operations.md), then: systemctl start openclaw-gateway"
+  exit 1
+fi
+
+log "updating plugins..."
+openclaw plugins update slack || log "WARNING: slack plugin update failed — check: openclaw plugins list"
+log "cleaning npm cache..."
 npm cache clean --force
-echo "[openclaw-upgrade] version: $(openclaw --version 2>&1 | head -1)"
-echo "[openclaw-upgrade] running doctor --fix for state/config migrations..."
-openclaw doctor --fix --force --non-interactive --yes || echo "[openclaw-upgrade] WARNING: doctor --fix reported an error — check manually before the gateway restarts"
-echo "[openclaw-upgrade] starting service..."
-systemctl start openclaw-gateway.service
-echo "[openclaw-upgrade] done."
+log "starting service..."
+if ! systemctl start openclaw-gateway.service; then
+  log "ERROR: gateway failed to start — check: journalctl -u openclaw-gateway -n 80"
+  exit 1
+fi
+log "done."
 UPGRADE
 chmod +x /usr/local/bin/openclaw-upgrade
 
@@ -521,6 +554,27 @@ systemctl enable openclaw-gateway
 systemctl start  openclaw-gateway
 
 echo "[bootstrap] openclaw-gateway service enabled and started"
+
+# Disable the default heartbeat automation that setup may create (see the
+# heartbeat note in section 5). Needs a reachable gateway, so retry for ~3 min.
+# The off state is required, not best-effort: if it can't be confirmed, stop the
+# gateway rather than leave a possible 30-minute paid agentTurn running. (On a
+# fresh install the gateway usually isn't up yet because the memory-repo clone
+# needs the deploy key — docs/setup.md covers disabling it on first start.)
+heartbeat_off=false
+for _ in $(seq 1 18); do
+  if openclaw system heartbeat disable >/dev/null 2>&1 && openclaw health 2>/dev/null | grep -qi 'heartbeat interval: disabled'; then
+    heartbeat_off=true
+    break
+  fi
+  sleep 10
+done
+if [ "$heartbeat_off" = true ]; then
+  echo "[bootstrap] Default heartbeat automation disabled (confirmed via openclaw health)"
+else
+  systemctl stop openclaw-gateway || true
+  echo "[bootstrap] WARNING: could not confirm heartbeat is disabled — gateway STOPPED. After adding the deploy key: systemctl start openclaw-gateway && HOME=/root openclaw system heartbeat disable && HOME=/root openclaw health | grep -i heartbeat"
+fi
 
 # ── 7b. Watchdog cron: refresh known-good every 5 min when service is healthy ─
 cat > /etc/cron.d/openclaw-watchdog <<'CRON'

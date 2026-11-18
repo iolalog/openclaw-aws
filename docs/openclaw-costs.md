@@ -30,18 +30,17 @@ A built-in agent heartbeat that sends a full Sonnet turn every 30 minutes to che
 
 **Cost at Sonnet 4.6 rates:** roughly $60/day if undetected. Combined with the Hermes health check above, the instance was burning ~$60/day until credits were exhausted.
 
-**Current state:** Disabled via `agents.defaults.heartbeat.every: "0m"` in `~/.openclaw/openclaw.json`, applied 2026-05-27.
+**Current state (2026.11.x and later):** the heartbeat is an ordinary automation, `heartbeat-main` ("Heartbeat (main)"), every 30 min, `agentTurn` — and it is **disabled**. The config key `agents.defaults.heartbeat` is retired: its presence makes the config invalid and the gateway refuses to start. `doctor --fix` converts the old key into the automation and preserves its disabled state (verified 2026-11-18).
 
-The correct off-switch is `{ "every": "0m" }`. Removing the key entirely does **not** disable it — OpenClaw falls back to the 30-minute default when the key is absent (this is what kept it running between 19:13 May 26 and the fix on May 27). `{ "enabled": false }` and a bare `false` are invalid schema and will be rejected on hot-reload.
-
-After every future upgrade, confirm the key survived config migration:
+After every upgrade, confirm it is still off (via SSM, `HOME=/root`, gateway running):
 
 ```bash
-# via SSM on the instance — should print {"every": "0m"}
-python3 -c "import json; cfg=json.load(open('/root/.openclaw/openclaw.json')); print(json.dumps(cfg.get('agents',{}).get('defaults',{}).get('heartbeat','MISSING')))"
+openclaw health | grep -i heartbeat        # must say: Heartbeat interval: disabled (main)
 ```
 
-If an upgrade overwrites it, re-apply `{ "every": "0m" }` and file a bug with OpenClaw.
+If it is enabled: `openclaw system heartbeat disable` (only touches the setup/doctor-created heartbeat jobs). With the gateway stopped, read the state DB instead: `sqlite3 -readonly /root/.openclaw/state/openclaw.sqlite "select name, enabled from cron_jobs"`.
+
+**History (2026-05-27 → 2026-11-18):** disabled via `agents.defaults.heartbeat.every: "0m"`. Removing the key did **not** disable it — OpenClaw fell back to the 30-minute default when the key was absent (this kept it running between 19:13 May 26 and the fix on May 27). `{ "enabled": false }` and a bare `false` were invalid schema.
 
 ### `sidecars.model-prewarm` — startup sidecar, probably not recurring
 
@@ -66,7 +65,7 @@ Both arrived default-on with OpenClaw 2.0 ("the largest update"), auto-creating 
 | Feature | Cost | Status |
 |---|---|---|
 | `plugins.entries.memory-core.config.dreaming` — "Grounded Dreaming", daily 3am model-backed memory consolidation cron job (`memory-core:memory-dreaming-promotion`) | Unmeasured, 1x/day | **Disabled** in config (2026-09-12) |
-| `skills.workshop.autonomous.mode` — weekly `agentTurn` cron job (`skill-collection-review:<agent>`) with `exec`/`write`/`edit` tool access against the workspace, unsupervised (`approvalPolicy` defaults to `"auto"`) | Unmeasured, 1x/week; unattended write/exec is also a safety concern | **Disabled** in config (2026-09-12): `autonomous.mode=off`, `approvalPolicy=pending` |
+| `skills.workshop.autonomous.mode` — weekly `agentTurn` cron job (`skill-collection-review:<agent>`) with `exec`/`write`/`edit` tool access against the workspace, unsupervised | Unmeasured, 1x/week; unattended write/exec is also a safety concern | **Disabled** in config (2026-09-12): `autonomous.mode=off`. (`approvalPolicy=pending` was also set until 2026.11.x removed the key with Skill Workshop proposals.) |
 
 `openclaw automations disable` refuses to touch either job (`system-owned monitor jobs cannot be edited by cron clients`); they must be turned off via `openclaw config set`, which is why bootstrap sets them at install time (see `infra/scripts/bootstrap.sh.tpl`). After any major-version upgrade, re-check both keys survived migration, the same way the heartbeat key is re-checked.
 

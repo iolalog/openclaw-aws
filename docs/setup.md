@@ -114,6 +114,14 @@ git clone git@github.com:YOUR_USERNAME/openclaw-memory.git /root/.openclaw/works
 systemctl restart openclaw-gateway
 ```
 
+Then make sure the LLM heartbeat automation is off (a 30-minute paid agent turn — see `docs/openclaw-costs.md`). Bootstrap stops the gateway if it couldn't confirm this itself:
+
+```bash
+export HOME=/root
+openclaw system heartbeat disable
+openclaw health | grep -i heartbeat   # must say: Heartbeat interval: disabled
+```
+
 ## 6. Approve Slack pairing
 
 Send a DM to the bot. It replies with a pairing code:
@@ -187,7 +195,7 @@ After any OpenClaw upgrade on the instance, run the repo helper:
 infra/scripts/post-upgrade-check.sh
 ```
 
-It checks the installed OpenClaw version, validates the live config schema, verifies the watchdog cron file, prints the heartbeat block, runs `openclaw-save-known-good`, shows config timestamps, and dumps recent gateway logs.
+It checks the installed OpenClaw version, runs `openclaw config validate`, verifies the watchdog cron file, checks the heartbeat automation is disabled (via `openclaw health`) and the other cost features are off, runs `openclaw-save-known-good`, shows config timestamps, and dumps recent gateway logs.
 
 If the upgrade included a gateway restart, also send one real Slack message and rerun the check. `known-good` should get a fresh timestamp and `fail-count` should return to `0`.
 

@@ -35,8 +35,9 @@ Repo:
 
 OpenClaw (details in `docs/openclaw-operations.md` / `docs/openclaw-costs.md`):
 - Upgrade only via `/usr/local/bin/openclaw-upgrade`, never `npm install -g openclaw` or `openclaw update`. Node must be ≥24.16 or npm silently installs an old release.
-- Ad-hoc `openclaw` CLI over SSM needs `export HOME=/root`; `doctor --fix` needs `OPENCLAW_SERVICE_REPAIR_POLICY=external`. Reset `/var/lib/openclaw/fail-count` to 0 before manual recovery.
-- After every upgrade, verify these stay off: `agents.defaults.heartbeat.every: "0m"` (absent key = 30-min Sonnet turns, ~$60/day), memory-core `dreaming`, `skills.workshop.autonomous.mode=off`.
+- Ad-hoc `openclaw` CLI over SSM needs `export HOME=/root`; `doctor --fix` needs `OPENCLAW_SERVICE_REPAIR_POLICY=external` and no `--non-interactive`/`--yes`. Reset `/var/lib/openclaw/fail-count` to 0 before manual recovery.
+- Check config with `openclaw config validate`, not `config schema` (which passes on an invalid config).
+- After every upgrade, verify these stay off: the `heartbeat-main` automation (`openclaw health` → `Heartbeat interval: disabled`; enabled = 30-min Sonnet turns, ~$60/day), memory-core `dreaming`, `skills.workshop.autonomous.mode=off`.
 - Reject `agentTurn` cron jobs or scripts that call an LLM when a shell check would do.
 - `/etc/cron.d/` lines must be single-line (no `\`). OpenClaw jobs live in root's crontab; `/etc/cron.d/openclaw` is system jobs only.
 
